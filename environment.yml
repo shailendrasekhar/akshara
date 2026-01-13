@@ -1,0 +1,12 @@
+name: akshara
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - PyQt6
+    - PyMuPDF
+    - pyttsx3
+    - pyinstaller  # For packaging as standalone app

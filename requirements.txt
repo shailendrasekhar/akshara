@@ -1,0 +1,4 @@
+PyQt6>=6.6.0
+PyMuPDF>=1.23.0
+pyttsx3>=2.90
+pyinstaller>=6.0.0

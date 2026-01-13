@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=AKSHARA
+Comment=PDF Reader with Text-to-Speech
+Exec=akshara %f
+Icon=akshara
+Terminal=false
+Type=Application
+Categories=Office;Viewer;
+MimeType=application/pdf;
+Keywords=pdf;reader;tts;text-to-speech;akshara;
+StartupWMClass=AKSHARA
