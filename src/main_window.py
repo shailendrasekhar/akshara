@@ -133,6 +133,9 @@ class MainWindow(QMainWindow):
         self.pdf_doc = PDFDocument(self)
         self.tts_engine = TTSEngine(self)
         
+        # Enable Kokoro TTS by default (falls back to espeak if unavailable)
+        self.tts_engine.enable_hf(True, voice="af_heart", lang_code="a")
+        
         # State
         self._current_speed = 1.0
         

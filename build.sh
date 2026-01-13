@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 
 # Activate conda environment
 source ~/anaconda3/etc/profile.d/conda.sh
-conda activate akshara
+conda activate talk2me
 
 # Clean previous builds
 rm -rf build dist
