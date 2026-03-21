@@ -9,15 +9,81 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QToolBar, QStatusBar, QFileDialog, QSlider,
     QSpinBox, QToolButton, QMessageBox, QApplication,
-    QStackedWidget, QPushButton
+    QStackedWidget, QPushButton, QLineEdit, QFrame, QMenu
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, QSize, pyqtSlot, QTimer, QSettings, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap
 
 from .pdf_handler import PDFDocument
 from .pdf_viewer import PDFViewerWidget, TextSpan
 from .tts_engine import TTSEngine
 from .ui.styles import get_main_stylesheet, get_welcome_stylesheet, get_pdf_viewer_stylesheet
+
+
+class SearchBar(QWidget):
+    """Inline search bar that appears at the top of the PDF viewer."""
+
+    search_changed = pyqtSignal(str)
+    navigate_next = pyqtSignal()
+    navigate_prev = pyqtSignal()
+    closed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Find in PDF...  (Enter to search)")
+        self.search_input.setFixedHeight(28)
+        self.search_input.returnPressed.connect(self._emit_search)
+        self.search_input.textChanged.connect(self._on_text_changed)
+        layout.addWidget(self.search_input)
+
+        self.result_label = QLabel("")
+        self.result_label.setFixedWidth(90)
+        layout.addWidget(self.result_label)
+
+        prev_btn = QToolButton()
+        prev_btn.setText("▲")
+        prev_btn.setToolTip("Previous result")
+        prev_btn.clicked.connect(self.navigate_prev.emit)
+        layout.addWidget(prev_btn)
+
+        next_btn = QToolButton()
+        next_btn.setText("▼")
+        next_btn.setToolTip("Next result")
+        next_btn.clicked.connect(self.navigate_next.emit)
+        layout.addWidget(next_btn)
+
+        close_btn = QToolButton()
+        close_btn.setText("✕")
+        close_btn.setToolTip("Close search (Escape)")
+        close_btn.clicked.connect(self.closed.emit)
+        layout.addWidget(close_btn)
+
+    def _on_text_changed(self, text: str):
+        if not text:
+            self.result_label.setText("")
+
+    def _emit_search(self):
+        text = self.search_input.text().strip()
+        if text:
+            self.search_changed.emit(text)
+
+    def set_result_text(self, text: str):
+        self.result_label.setText(text)
+
+    def focus_input(self):
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def current_query(self) -> str:
+        return self.search_input.text().strip()
 
 
 class WelcomeWidget(QWidget):
@@ -136,9 +202,19 @@ class MainWindow(QMainWindow):
         # Enable Kokoro TTS by default (falls back to espeak if unavailable)
         self.tts_engine.enable_hf(True, voice="af_heart", lang_code="a")
         
+        # Persistent settings
+        self._settings = QSettings("Akshara", "PDFReader")
+
         # State
         self._current_speed = 1.0
-        
+
+        # Recent files
+        self._recent_files: list = list(self._settings.value("recent_files", []) or [])
+
+        # Search state
+        self._all_search_results: list = []   # List of (page_num, QRectF)
+        self._search_current_idx: int = -1
+
         # Setup UI
         self._setup_window()
         self._setup_menu()
@@ -176,9 +252,14 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._open_file_dialog)
         file_menu.addAction(open_action)
-        
+
+        # Recent Files submenu
+        self.recent_menu = QMenu("&Recent Files", self)
+        file_menu.addMenu(self.recent_menu)
+        self._update_recent_menu()
+
         file_menu.addSeparator()
-        
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -203,7 +284,25 @@ class MainWindow(QMainWindow):
         self.theme_action.setShortcut(QKeySequence("Ctrl+T"))
         self.theme_action.triggered.connect(self._toggle_theme)
         view_menu.addAction(self.theme_action)
-        
+
+        view_menu.addSeparator()
+
+        find_action = QAction("&Find in PDF...", self)
+        find_action.setShortcut(QKeySequence("Ctrl+F"))
+        find_action.triggered.connect(self._open_search)
+        view_menu.addAction(find_action)
+
+        # Bookmarks menu
+        self.bookmarks_menu = menubar.addMenu("&Bookmarks")
+        add_bookmark_action = QAction("&Add Bookmark", self)
+        add_bookmark_action.setShortcut(QKeySequence("Ctrl+B"))
+        add_bookmark_action.triggered.connect(self._toggle_bookmark)
+        self.bookmarks_menu.addAction(add_bookmark_action)
+
+        self.bookmarks_menu.addSeparator()
+        self._bookmark_separator = self.bookmarks_menu.addSeparator()
+        self._bookmark_actions_start = None  # sentinel
+
         # Speech menu
         speech_menu = menubar.addMenu("&Speech")
         
@@ -374,17 +473,32 @@ class MainWindow(QMainWindow):
     def _setup_central_widget(self):
         """Setup the central widget."""
         self.stacked_widget = QStackedWidget()
-        
+
         # Welcome screen
         self.welcome_widget = WelcomeWidget(dark_mode=self._dark_mode)
         self.welcome_widget.open_button.clicked.connect(self._open_file_dialog)
         self.stacked_widget.addWidget(self.welcome_widget)
-        
-        # PDF viewer
+
+        # Viewer container: search bar (hidden) + PDF viewer
+        self.viewer_container = QWidget()
+        viewer_layout = QVBoxLayout(self.viewer_container)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.setSpacing(0)
+
+        self.search_bar = SearchBar()
+        self.search_bar.hide()
+        self.search_bar.search_changed.connect(self._on_search)
+        self.search_bar.navigate_next.connect(self._search_next)
+        self.search_bar.navigate_prev.connect(self._search_prev)
+        self.search_bar.closed.connect(self._close_search)
+        viewer_layout.addWidget(self.search_bar)
+
         self.pdf_viewer = PDFViewerWidget()
         self.pdf_viewer.text_selected.connect(self._on_text_selected)
-        self.stacked_widget.addWidget(self.pdf_viewer)
-        
+        viewer_layout.addWidget(self.pdf_viewer)
+
+        self.stacked_widget.addWidget(self.viewer_container)
+
         self.stacked_widget.setCurrentWidget(self.welcome_widget)
         self.setCentralWidget(self.stacked_widget)
     
@@ -456,9 +570,15 @@ class MainWindow(QMainWindow):
         """Load a PDF file."""
         self.status_label.setText(f"Loading: {os.path.basename(file_path)}...")
         QApplication.processEvents()
-        
+
         if self.pdf_doc.load(file_path):
-            self.stacked_widget.setCurrentWidget(self.pdf_viewer)
+            self._add_to_recent(file_path)
+            self.stacked_widget.setCurrentWidget(self.viewer_container)
+            # Clear any stale search/bookmarks highlights
+            self.pdf_viewer.clear_search_highlights()
+            self._all_search_results = []
+            self._search_current_idx = -1
+            self._update_bookmarks_menu()
             # Delay fit-to-width to ensure viewport is sized
             QTimer.singleShot(50, self._fit_and_render)
     
@@ -597,20 +717,21 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_document_loaded(self, page_count: int):
         self.setWindowTitle(f"AKSHARA - {self.pdf_doc.title}")
-        
+
         self.page_spin.setMaximum(page_count)
         self.page_spin.setValue(1)
         self.page_spin.setEnabled(True)
         self.page_total_label.setText(f" / {page_count}")
-        
+
         self.prev_btn.setEnabled(True)
         self.next_btn.setEnabled(True)
         self.play_btn.setEnabled(True)
         self.play_sel_btn.setEnabled(True)
         self.zoom_in_btn.setEnabled(True)
         self.zoom_out_btn.setEnabled(True)
-        
+
         self.status_label.setText(f"Loaded: {self.pdf_doc.title} ({page_count} pages)")
+        self._update_bookmarks_menu()
     
     @pyqtSlot(str)
     def _on_text_selected(self, text: str):
@@ -658,6 +779,176 @@ class MainWindow(QMainWindow):
             "</ul>"
         )
     
+    # ===== Recent Files =====
+
+    def _add_to_recent(self, file_path: str):
+        """Add file to recent files list."""
+        if file_path in self._recent_files:
+            self._recent_files.remove(file_path)
+        self._recent_files.insert(0, file_path)
+        self._recent_files = self._recent_files[:10]
+        self._settings.setValue("recent_files", self._recent_files)
+        self._update_recent_menu()
+
+    def _update_recent_menu(self):
+        """Rebuild the Recent Files submenu."""
+        self.recent_menu.clear()
+        if not self._recent_files:
+            no_action = QAction("(No recent files)", self)
+            no_action.setEnabled(False)
+            self.recent_menu.addAction(no_action)
+            return
+        for path in self._recent_files:
+            name = os.path.basename(path)
+            action = QAction(name, self)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked, p=path: self._load_pdf(p))
+            self.recent_menu.addAction(action)
+        self.recent_menu.addSeparator()
+        clear_action = QAction("Clear Recent Files", self)
+        clear_action.triggered.connect(self._clear_recent)
+        self.recent_menu.addAction(clear_action)
+
+    def _clear_recent(self):
+        """Clear the recent files list."""
+        self._recent_files = []
+        self._settings.setValue("recent_files", [])
+        self._update_recent_menu()
+
+    # ===== Bookmarks =====
+
+    def _bookmark_key(self) -> str:
+        return f"bookmarks_{self.pdf_doc.file_path}"
+
+    def _get_bookmarks(self) -> list:
+        return list(self._settings.value(self._bookmark_key(), []) or [])
+
+    def _toggle_bookmark(self):
+        """Add or remove bookmark for the current page."""
+        if not self.pdf_doc.is_loaded:
+            return
+        page = self.pdf_doc.current_page
+        bookmarks = self._get_bookmarks()
+        if page in bookmarks:
+            bookmarks.remove(page)
+            self.status_label.setText(f"Bookmark removed from page {page + 1}")
+        else:
+            bookmarks.append(page)
+            bookmarks.sort()
+            self.status_label.setText(f"Bookmarked page {page + 1}")
+        self._settings.setValue(self._bookmark_key(), bookmarks)
+        self._update_bookmarks_menu()
+
+    def _update_bookmarks_menu(self):
+        """Rebuild the bookmarks list in the Bookmarks menu."""
+        # Remove old bookmark page actions (keep first two: Add + separator)
+        actions = self.bookmarks_menu.actions()
+        for action in actions[2:]:
+            self.bookmarks_menu.removeAction(action)
+
+        if not self.pdf_doc.is_loaded:
+            return
+
+        bookmarks = self._get_bookmarks()
+        if not bookmarks:
+            no_bm = QAction("(No bookmarks)", self)
+            no_bm.setEnabled(False)
+            self.bookmarks_menu.addAction(no_bm)
+            return
+
+        for page in bookmarks:
+            action = QAction(f"Page {page + 1}", self)
+            action.triggered.connect(lambda checked, p=page: self._go_to_bookmark(p))
+            self.bookmarks_menu.addAction(action)
+
+        self.bookmarks_menu.addSeparator()
+        clear_bm = QAction("Clear All Bookmarks", self)
+        clear_bm.triggered.connect(self._clear_bookmarks)
+        self.bookmarks_menu.addAction(clear_bm)
+
+    def _go_to_bookmark(self, page: int):
+        """Navigate to a bookmarked page."""
+        if self.pdf_doc.go_to_page(page):
+            self._render_current_page()
+            self._update_page_indicator()
+            self.status_label.setText(f"Jumped to bookmark: page {page + 1}")
+
+    def _clear_bookmarks(self):
+        """Remove all bookmarks for current file."""
+        self._settings.remove(self._bookmark_key())
+        self._update_bookmarks_menu()
+        self.status_label.setText("All bookmarks cleared")
+
+    # ===== Search =====
+
+    def _open_search(self):
+        """Show the search bar."""
+        if not self.pdf_doc.is_loaded:
+            return
+        self.stacked_widget.setCurrentWidget(self.viewer_container)
+        self.search_bar.show()
+        self.search_bar.focus_input()
+
+    def _close_search(self):
+        """Hide the search bar and clear highlights."""
+        self.search_bar.hide()
+        self.pdf_viewer.clear_search_highlights()
+        self._all_search_results = []
+        self._search_current_idx = -1
+
+    def _on_search(self, query: str):
+        """Run a search across all pages."""
+        if not self.pdf_doc.is_loaded or not query:
+            return
+        results_by_page = self.pdf_doc.search_all_pages(query)
+        self._all_search_results = []
+        for page_num in sorted(results_by_page.keys()):
+            for rect in results_by_page[page_num]:
+                self._all_search_results.append((page_num, rect))
+
+        if self._all_search_results:
+            self._search_current_idx = 0
+            self._show_search_result(0)
+            total = len(self._all_search_results)
+            self.search_bar.set_result_text(f"1 / {total}")
+        else:
+            self._search_current_idx = -1
+            self.pdf_viewer.clear_search_highlights()
+            self.search_bar.set_result_text("Not found")
+
+    def _show_search_result(self, idx: int):
+        """Navigate to and highlight a specific search result."""
+        if not self._all_search_results:
+            return
+        page_num, _ = self._all_search_results[idx]
+        if page_num != self.pdf_doc.current_page:
+            self.pdf_doc.go_to_page(page_num)
+            self._render_current_page()
+            self._update_page_indicator()
+        # Highlight all results on this page, mark the active one
+        page_rects = [(i, r) for i, (p, r) in enumerate(self._all_search_results) if p == page_num]
+        rects = [r for _, r in page_rects]
+        local_active = next((li for li, (gi, _) in enumerate(page_rects) if gi == idx), -1)
+        self.pdf_viewer.set_search_highlights(rects, local_active)
+
+    def _search_next(self):
+        """Move to the next search result."""
+        if not self._all_search_results:
+            if self.search_bar.current_query():
+                self._on_search(self.search_bar.current_query())
+            return
+        self._search_current_idx = (self._search_current_idx + 1) % len(self._all_search_results)
+        self._show_search_result(self._search_current_idx)
+        self.search_bar.set_result_text(f"{self._search_current_idx + 1} / {len(self._all_search_results)}")
+
+    def _search_prev(self):
+        """Move to the previous search result."""
+        if not self._all_search_results:
+            return
+        self._search_current_idx = (self._search_current_idx - 1) % len(self._all_search_results)
+        self._show_search_result(self._search_current_idx)
+        self.search_bar.set_result_text(f"{self._search_current_idx + 1} / {len(self._all_search_results)}")
+
     # ===== Drag and Drop =====
     
     def dragEnterEvent(self, event):
@@ -686,7 +977,10 @@ class MainWindow(QMainWindow):
             elif self.pdf_doc.is_loaded:
                 self._play_page()
         elif event.key() == Qt.Key.Key_Escape:
-            self._stop()
+            if not self.search_bar.isHidden():
+                self._close_search()
+            else:
+                self._stop()
         else:
             super().keyPressEvent(event)
     

@@ -226,6 +226,35 @@ class PDFDocument(QObject):
         
         return spans
     
+    def search_text(self, query: str, page_num: Optional[int] = None) -> List[QRectF]:
+        """Search for text on a page. Returns list of bounding rectangles."""
+        if not self._doc or not query.strip():
+            return []
+        if page_num is None:
+            page_num = self._current_page
+        try:
+            page = self._doc[page_num]
+            rects = page.search_for(query.strip())
+            return [QRectF(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0) for r in rects]
+        except Exception as e:
+            self.error_occurred.emit(f"Search failed: {str(e)}")
+            return []
+
+    def search_all_pages(self, query: str) -> dict:
+        """Search across all pages. Returns {page_num: [QRectF]}."""
+        results = {}
+        if not self._doc or not query.strip():
+            return results
+        for i in range(self.page_count):
+            try:
+                page = self._doc[i]
+                rects = page.search_for(query.strip())
+                if rects:
+                    results[i] = [QRectF(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0) for r in rects]
+            except:
+                pass
+        return results
+
     def extract_text(self, page_num: Optional[int] = None) -> str:
         """
         Extract plain text from a page.

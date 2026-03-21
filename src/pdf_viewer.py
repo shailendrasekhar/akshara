@@ -49,10 +49,16 @@ class PDFPageWidget(QWidget):
         self._tts_char_start: int = -1
         self._tts_char_end: int = -1
         self._tts_highlight_spans: List[int] = []
-        
+
+        # Search highlights (list of QRectF in page coords)
+        self._search_rects: List[QRectF] = []
+        self._search_active_idx: int = -1  # which result is "current"
+
         # Colors
         self._selection_color = QColor(99, 102, 241, 80)
         self._tts_color = QColor(250, 204, 21, 150)
+        self._search_color = QColor(34, 197, 94, 120)
+        self._search_active_color = QColor(249, 115, 22, 180)
         
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.IBeamCursor)
@@ -90,6 +96,18 @@ class PDFPageWidget(QWidget):
         
         self._full_text = " ".join(parts)
     
+    def set_search_highlights(self, rects: List[QRectF], active_idx: int = -1):
+        """Highlight search result rectangles (in page coords)."""
+        self._search_rects = rects
+        self._search_active_idx = active_idx
+        self.update()
+
+    def clear_search_highlights(self):
+        """Clear search highlights."""
+        self._search_rects = []
+        self._search_active_idx = -1
+        self.update()
+
     def clear(self):
         """Clear everything."""
         self._pixmap = None
@@ -97,6 +115,7 @@ class PDFPageWidget(QWidget):
         self._full_text = ""
         self.clear_selection()
         self.clear_tts_highlight()
+        self.clear_search_highlights()
         self.update()
     
     def clear_selection(self):
@@ -203,6 +222,21 @@ class PDFPageWidget(QWidget):
                     )
                     painter.drawRoundedRect(rect, 2, 2)
         
+        # Draw search highlights (green = all results, orange = active)
+        if self._search_rects:
+            for i, rect in enumerate(self._search_rects):
+                color = self._search_active_color if i == self._search_active_idx else self._search_color
+                border = QColor(249, 115, 22) if i == self._search_active_idx else QColor(34, 197, 94)
+                painter.setBrush(QBrush(color))
+                painter.setPen(QPen(border, 2))
+                scaled = QRectF(
+                    rect.x() * self._scale,
+                    rect.y() * self._scale,
+                    rect.width() * self._scale,
+                    rect.height() * self._scale
+                )
+                painter.drawRoundedRect(scaled, 2, 2)
+
         # Draw selection rectangle while dragging
         if self._is_selecting and self._selection_start and self._selection_end:
             painter.setBrush(QBrush(QColor(99, 102, 241, 30)))
@@ -364,6 +398,14 @@ class PDFViewerWidget(QWidget):
         """Clear selection."""
         self.page_widget.clear_selection()
     
+    def set_search_highlights(self, rects: List[QRectF], active_idx: int = -1):
+        """Show search result highlights."""
+        self.page_widget.set_search_highlights(rects, active_idx)
+
+    def clear_search_highlights(self):
+        """Clear search highlights."""
+        self.page_widget.clear_search_highlights()
+
     def clear(self):
         """Clear display."""
         self._current_read_position = 0
