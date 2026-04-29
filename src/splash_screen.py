@@ -1,223 +1,254 @@
-"""
-Splash Screen Module
-Animated splash with white blur reveal effect and accelerating logo.
-"""
+from __future__ import annotations
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGraphicsOpacityEffect, QGraphicsBlurEffect
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QSequentialAnimationGroup, QParallelAnimationGroup
-from PyQt6.QtGui import QFont, QPainter, QColor
+from pathlib import Path
 
+from PyQt6.QtCore import (
+    Qt, QTimer, QPropertyAnimation, QEasingCurve,
+    pyqtSignal, QRect, QPoint, QSize,
+    QSequentialAnimationGroup, QParallelAnimationGroup,
+)
+from PyQt6.QtGui import (
+    QPainter, QColor, QFont, QPainterPath, QPen, QPixmap,
+)
+from PyQt6.QtWidgets import (
+    QWidget, QApplication, QMainWindow, QGraphicsOpacityEffect,
+)
+
+
+# ---------- Logo widget (pure QPainter, no graphics effects on children) ------
+
+class _Logo(QWidget):
+    """
+    Circular logo plate. Draws itself; no child widgets, so a single
+    QGraphicsOpacityEffect on this widget is safe and unambiguous.
+    """
+
+    def __init__(self, size: int, dark: bool, image_path: Path | None = None, parent=None):
+        super().__init__(parent)
+        self._dark = dark
+        self._pixmap: QPixmap | None = None
+        if image_path and image_path.exists():
+            pm = QPixmap(str(image_path))
+            if not pm.isNull():
+                self._pixmap = pm
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        ink  = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
+        bg   = QColor("#000000") if self._dark else QColor("#ffffff")
+        rim  = QColor("#2a2a2a") if self._dark else QColor("#e0e0dc")
+
+        d = min(self.width(), self.height()) - 2
+        r = QRect(1, 1, d, d)
+
+        # circle background
+        path = QPainterPath()
+        path.addEllipse(r.x(), r.y(), r.width(), r.height())
+        p.fillPath(path, bg)
+        p.setPen(QPen(rim, 1.5))
+        p.drawEllipse(r)
+
+        if self._pixmap:
+            inset = int(d * 0.18)
+            target = r.adjusted(inset, inset, -inset, -inset)
+            scaled = self._pixmap.scaled(
+                target.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            ox = target.x() + (target.width()  - scaled.width())  // 2
+            oy = target.y() + (target.height() - scaled.height()) // 2
+            p.drawPixmap(ox, oy, scaled)
+        else:
+            font = QFont("Georgia", max(10, int(d * 0.42)), QFont.Weight.Light)
+            p.setFont(font)
+            p.setPen(ink)
+            p.drawText(r, Qt.AlignmentFlag.AlignCenter, "A")
+
+
+# ---------- Full-screen splash overlay ----------------------------------------
 
 class SplashScreen(QWidget):
     """
-    Animated splash screen with white blur reveal and accelerating logo.
-    Supports dark/light mode color schemes.
+    Three-phase intro:
+      1. Logo fades in, centred on screen.
+      2. Brief hold.
+      3. Logo shrinks + travels to top-left of main_window while the
+         main window fades in beneath it; splash then closes.
     """
-    
-    finished = pyqtSignal()  # Emitted when animation completes
-    
-    def __init__(self, dark_mode: bool = True):
-        super().__init__()
-        
-        self._dark_mode = dark_mode
-        
-        # Set colors based on mode
-        if dark_mode:
-            self._bg_color = "#000000"
-            self._text_color = "#ffffff"
-            self._text_rgb = "255,255,255"
-            self._subtitle_color = "#a0a0a0"
-            self._subtitle_rgb = "160,160,160"
-        else:
-            self._bg_color = "#ffffff"
-            self._text_color = "#000000"
-            self._text_rgb = "0,0,0"
-            self._subtitle_color = "#666666"
-            self._subtitle_rgb = "102,102,102"
-        
-        # Frameless, always on top during splash
+
+    finished = pyqtSignal()
+
+    _LOGO_LARGE = 180   # px — centred phase
+    _LOGO_SMALL = 46    # px — corner resting size
+    # Logo lands at screen top-left + this offset (splash is a screen overlay)
+    _CORNER_X   = 16
+    _CORNER_Y   = 54    # below menu bar / title bar
+
+    def __init__(self, main_window: QMainWindow, dark_mode: bool = True):
+        super().__init__(None)
+        self._win  = main_window
+        self._dark = dark_mode
+
+        bg = "#000000" if dark_mode else "#ffffff"
+        self.setStyleSheet(f"background:{bg};")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.SplashScreen
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        
-        self._setup_ui()
-        self._setup_animations()
-    
-    def _setup_ui(self):
-        """Build the splash UI."""
-        self.setFixedSize(500, 400)
-        self.setStyleSheet(f"background-color: {self._bg_color};")
-        
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.setSpacing(16)
-        
-        # Icon label
-        self.icon_label = QLabel("📖")
-        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.icon_label.setStyleSheet(f"font-size: 80px; background: transparent; color: {self._text_color};")
-        layout.addWidget(self.icon_label)
-        
-        # Title label
-        self.title_label = QLabel("AKSHARA")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont("Georgia", 42)
-        font.setWeight(QFont.Weight.Light)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 12)
-        self.title_label.setFont(font)
-        self.title_label.setStyleSheet(f"background: transparent; color: {self._text_color};")
-        layout.addWidget(self.title_label)
-        
-        # Subtitle
-        self.subtitle_label = QLabel("PDF Reader with Text-to-Speech")
-        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.subtitle_label.setStyleSheet(
-            f"font-size: 13px; letter-spacing: 3px; background: transparent; color: {self._subtitle_color};"
-        )
-        layout.addWidget(self.subtitle_label)
-        
-        # --- Effects for blur reveal ---
-        # Blur effect on icon
-        self.icon_blur = QGraphicsBlurEffect()
-        self.icon_blur.setBlurRadius(30)
-        self.icon_label.setGraphicsEffect(self.icon_blur)
-        
-        # Blur effect on title
-        self.title_blur = QGraphicsBlurEffect()
-        self.title_blur.setBlurRadius(30)
-        self.title_label.setGraphicsEffect(self.title_blur)
-        
-        # Blur effect on subtitle
-        self.subtitle_blur = QGraphicsBlurEffect()
-        self.subtitle_blur.setBlurRadius(30)
-        self.subtitle_label.setGraphicsEffect(self.subtitle_blur)
-        
-        # Opacity for fade-in
-        self.icon_opacity = QGraphicsOpacityEffect()
-        self.icon_opacity.setOpacity(0)
-        
-        self.title_opacity = QGraphicsOpacityEffect()
-        self.title_opacity.setOpacity(0)
-        
-        self.subtitle_opacity = QGraphicsOpacityEffect()
-        self.subtitle_opacity.setOpacity(0)
-        
-        # Center on screen
-        self._center_on_screen()
-    
-    def _center_on_screen(self):
-        """Center the splash on the primary screen."""
-        from PyQt6.QtWidgets import QApplication
+
         screen = QApplication.primaryScreen().availableGeometry()
-        x = (screen.width() - self.width()) // 2
-        y = (screen.height() - self.height()) // 2
-        self.move(x, y)
-    
-    def _setup_animations(self):
-        """Setup smooth blur-to-clear reveal with gentle easing."""
-        # Animate blur radius from 40 -> 0 using QTimer steps
-        # Combined with opacity fade-in for smoother feel
-        
-        self._blur_steps = 0
-        self._max_blur_steps = 60  # More steps for smoother animation
-        self._initial_blur = 40.0
-        self._initial_opacity = 0.0
-        
-        # Timer for blur animation (consistent smooth timing)
-        self._blur_timer = QTimer(self)
-        self._blur_timer.timeout.connect(self._animate_blur_step)
-        
-        # Final finish timer
-        self._finish_timer = QTimer(self)
-        self._finish_timer.setSingleShot(True)
-        self._finish_timer.timeout.connect(self._on_animation_complete)
-    
+        self._screen = screen
+        self.setGeometry(screen)
+
+        # Logo — large, centred
+        logo_path = Path(__file__).resolve().parents[1] / "resources" / "icons" / "logo.png"
+        self._logo = _Logo(self._LOGO_LARGE, dark_mode, logo_path, parent=self)
+
+        cx = (screen.width()  - self._LOGO_LARGE) // 2
+        cy = (screen.height() - self._LOGO_LARGE) // 2
+        self._logo.move(cx, cy)
+        self._logo_start_rect = QRect(cx, cy, self._LOGO_LARGE, self._LOGO_LARGE)
+
+        # Wordmark below logo
+        ink   = "#ffffff" if dark_mode else "#0a0a0a"
+        muted = "#888888" if dark_mode else "#777777"
+        from PyQt6.QtWidgets import QLabel
+        self._title = QLabel("AKSHARA", self)
+        self._title.setStyleSheet(
+            f"font-family:Georgia,serif;font-size:36px;font-weight:300;"
+            f"letter-spacing:12px;color:{ink};background:transparent;"
+        )
+        self._title.adjustSize()
+        self._title.move(
+            (screen.width() - self._title.width()) // 2,
+            cy + self._LOGO_LARGE + 20,
+        )
+
+        self._sub = QLabel("PDF · FOCUS · ANALYTICS", self)
+        self._sub.setStyleSheet(
+            f"font-size:11px;letter-spacing:3.5px;color:{muted};background:transparent;"
+        )
+        self._sub.adjustSize()
+        self._sub.move(
+            (screen.width() - self._sub.width()) // 2,
+            cy + self._LOGO_LARGE + 64,
+        )
+
+        # Opacity effect on logo
+        self._logo_op = QGraphicsOpacityEffect()
+        self._logo_op.setOpacity(0.0)
+        self._logo.setGraphicsEffect(self._logo_op)
+
+        self._text_op = QGraphicsOpacityEffect()
+        self._text_op.setOpacity(0.0)
+        self._title.setGraphicsEffect(self._text_op)
+
+        self._sub_op = QGraphicsOpacityEffect()
+        self._sub_op.setOpacity(0.0)
+        self._sub.setGraphicsEffect(self._sub_op)
+
+        # Main window opacity for fade-in
+        self._win_op = QGraphicsOpacityEffect()
+        self._win_op.setOpacity(0.0)
+        target = self._win.centralWidget() or self._win
+        target.setGraphicsEffect(self._win_op)
+
     def start(self):
-        """Start the splash animation."""
-        # Start with elements invisible (using rgba with 0 alpha)
-        self.icon_label.setStyleSheet(f"font-size: 80px; background: transparent; color: rgba({self._text_rgb},0);")
-        self.title_label.setStyleSheet(f"background: transparent; color: rgba({self._text_rgb},0);")
-        self.subtitle_label.setStyleSheet(f"font-size: 13px; letter-spacing: 3px; background: transparent; color: rgba({self._subtitle_rgb},0);")
-        
+        # Main window is already maximized (set in _setup_window), keep it hidden
+        # until the travel phase reveals it
+        self._win.hide()
         self.show()
-        # Start blur reveal after a brief pause
-        QTimer.singleShot(300, self._start_blur_animation)
-    
-    def _start_blur_animation(self):
-        """Begin the smooth blur-to-clear animation."""
-        self._blur_steps = 0
-        # Consistent 25ms interval for smooth 60-step animation (~1.5s total)
-        self._blur_timer.start(25)
-    
-    def _ease_out_cubic(self, t: float) -> float:
-        """Cubic ease-out: fast start, gentle slow finish."""
-        return 1 - pow(1 - t, 3)
-    
-    def _ease_in_out_sine(self, t: float) -> float:
-        """Sine ease-in-out: very smooth and gentle."""
-        import math
-        return -(math.cos(math.pi * t) - 1) / 2
-    
-    def _animate_blur_step(self):
-        """Animate one step of blur reduction with smooth easing."""
-        self._blur_steps += 1
-        progress = self._blur_steps / self._max_blur_steps
-        
-        # Use smooth ease-out curve for gentle deceleration
-        eased_progress = self._ease_out_cubic(progress)
-        
-        # Calculate current blur radius (decreasing)
-        current_blur = self._initial_blur * (1 - eased_progress)
-        current_blur = max(0, current_blur)
-        
-        # Calculate opacity (increasing) - use sine for extra smoothness
-        opacity_progress = self._ease_in_out_sine(min(progress * 1.2, 1.0))  # Slightly faster fade-in
-        
-        # Apply blur to all elements
-        self.icon_blur.setBlurRadius(current_blur)
-        self.title_blur.setBlurRadius(current_blur)
-        self.subtitle_blur.setBlurRadius(current_blur)
-        
-        # Apply opacity via stylesheet color alpha
-        icon_alpha = int(255 * opacity_progress)
-        text_alpha = int(255 * opacity_progress)
-        subtitle_alpha = int(255 * opacity_progress)
-        
-        self.icon_label.setStyleSheet(f"font-size: 80px; background: transparent; color: rgba({self._text_rgb},{icon_alpha});")
-        self.title_label.setStyleSheet(f"background: transparent; color: rgba({self._text_rgb},{text_alpha});")
-        self.subtitle_label.setStyleSheet(f"font-size: 13px; letter-spacing: 3px; background: transparent; color: rgba({self._subtitle_rgb},{subtitle_alpha});")
-        
-        if self._blur_steps >= self._max_blur_steps:
-            self._blur_timer.stop()
-            # Hold for a moment, then finish
-            self._finish_timer.start(800)
-    
-    def _on_animation_complete(self):
-        """Called when animation is done - emit signal and hide."""
+        QTimer.singleShot(100, self._phase_fadein)
+
+    # ---- phase 1: fade in logo + text ----
+
+    def _phase_fadein(self):
+        dur = 600
+
+        a_logo = QPropertyAnimation(self._logo_op, b"opacity", self)
+        a_logo.setDuration(dur)
+        a_logo.setStartValue(0.0); a_logo.setEndValue(1.0)
+        a_logo.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        a_title = QPropertyAnimation(self._text_op, b"opacity", self)
+        a_title.setDuration(dur); a_title.setStartValue(0.0); a_title.setEndValue(1.0)
+        a_title.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        a_sub = QPropertyAnimation(self._sub_op, b"opacity", self)
+        a_sub.setDuration(dur); a_sub.setStartValue(0.0); a_sub.setEndValue(1.0)
+        a_sub.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        grp = QParallelAnimationGroup(self)
+        grp.addAnimation(a_logo)
+        grp.addAnimation(a_title)
+        grp.addAnimation(a_sub)
+        grp.finished.connect(lambda: QTimer.singleShot(500, self._phase_travel))
+        grp.start()
+        self._fadein_grp = grp
+
+    # ---- phase 2: travel to top-left corner ----
+
+    def _phase_travel(self):
+        a_text = QPropertyAnimation(self._text_op, b"opacity", self)
+        a_text.setDuration(300); a_text.setStartValue(1.0); a_text.setEndValue(0.0)
+
+        a_sub = QPropertyAnimation(self._sub_op, b"opacity", self)
+        a_sub.setDuration(300); a_sub.setStartValue(1.0); a_sub.setEndValue(0.0)
+
+        # Logo travels to screen top-left (splash covers the full screen)
+        end_rect = QRect(
+            self._screen.x() + self._CORNER_X,
+            self._screen.y() + self._CORNER_Y,
+            self._LOGO_SMALL, self._LOGO_SMALL,
+        )
+
+        a_geom = QPropertyAnimation(self._logo, b"geometry", self)
+        a_geom.setDuration(900)
+        a_geom.setStartValue(self._logo_start_rect)
+        a_geom.setEndValue(end_rect)
+        a_geom.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        # Reveal maximized main window beneath the splash
+        self._win.show()
+        a_win = QPropertyAnimation(self._win_op, b"opacity", self)
+        a_win.setDuration(900)
+        a_win.setStartValue(0.0); a_win.setEndValue(1.0)
+        a_win.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        grp = QParallelAnimationGroup(self)
+        grp.addAnimation(a_text)
+        grp.addAnimation(a_sub)
+        grp.addAnimation(a_geom)
+        grp.addAnimation(a_win)
+        grp.finished.connect(self._phase_done)
+        grp.start()
+        self._travel_grp = grp
+
+    def _phase_done(self):
+        target = self._win.centralWidget() or self._win
+        target.setGraphicsEffect(None)
         self.finished.emit()
         self.close()
 
 
+# ---------- Controller --------------------------------------------------------
+
 class SplashController:
-    """
-    Controller to manage splash -> main window transition.
-    """
-    
-    def __init__(self, main_window, dark_mode: bool = True):
+    def __init__(self, main_window: QMainWindow, dark_mode: bool = True):
         self.main_window = main_window
-        self.splash = SplashScreen(dark_mode=dark_mode)
-        self.splash.finished.connect(self._show_main_window)
-    
+        self.splash = SplashScreen(main_window, dark_mode=dark_mode)
+        self.splash.finished.connect(self._cleanup)
+
     def start(self):
-        """Show splash and start animation."""
         self.splash.start()
-    
-    def _show_main_window(self):
-        """Show main window after splash completes."""
-        self.main_window.show()
-        # Optionally start minimized then restore for "taskbar sit" effect
-        # self.main_window.showMinimized()
-        # QTimer.singleShot(100, self.main_window.showNormal)
+
+    def _cleanup(self):
+        # Window is already shown and opacity effect removed in _phase_done
+        pass

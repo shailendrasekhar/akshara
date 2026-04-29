@@ -1,14 +1,10 @@
-"""
-Text-to-Speech Engine Module
-Uses Kokoro TTS model for high-quality speech synthesis.
-"""
-
 import threading
 import re
 from typing import Optional, List
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # Kokoro TTS dependencies
+_KOKORO_IMPORT_ERROR = ""
 try:
     from kokoro import KPipeline
     import torch
@@ -17,23 +13,14 @@ try:
     _KOKORO_AVAILABLE = True
 except ImportError as e:
     _KOKORO_AVAILABLE = False
-    _IMPORT_ERROR = str(e)
+    _KOKORO_IMPORT_ERROR = str(e)
 
 
 def split_into_sentences(text: str) -> List[str]:
-    """Split text into sentences for highlighting."""
-    # Split on sentence-ending punctuation, keeping the punctuation
-    # This regex splits on . ! ? followed by space or end of string
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    # Filter out empty strings and strip whitespace
-    return [s.strip() for s in sentences if s.strip()]
+    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
 
 
 class TTSEngine(QObject):
-    """
-    TTS Engine using Kokoro-82M for high-quality speech synthesis.
-    Provides word/phrase highlighting as audio plays.
-    """
     
     speech_started = pyqtSignal()
     speech_finished = pyqtSignal()
@@ -59,17 +46,7 @@ class TTSEngine(QObject):
         # Text to speak
         self._text = ""
     
-    def set_voice(self, voice: str):
-        """Set the Kokoro voice to use."""
-        self._voice = voice
-    
-    def set_lang_code(self, lang_code: str):
-        """Set the language code (e.g., 'a' for American English)."""
-        self._lang_code = lang_code
-        self._ready = False  # Force reload with new lang
-    
     def enable_hf(self, enabled: bool = True, voice: Optional[str] = None, lang_code: Optional[str] = None):
-        """Configure Kokoro TTS. For API compatibility."""
         if voice:
             self._voice = voice
         if lang_code:
@@ -82,7 +59,7 @@ class TTSEngine(QObject):
             return
         
         if not _KOKORO_AVAILABLE:
-            raise RuntimeError(f"Kokoro TTS not available: {_IMPORT_ERROR}")
+            raise RuntimeError(f"Kokoro TTS not available: {_KOKORO_IMPORT_ERROR}")
         
         self._pipeline = KPipeline(lang_code=self._lang_code, repo_id='hexgrad/Kokoro-82M')
         self._ready = True
@@ -109,60 +86,40 @@ class TTSEngine(QObject):
         
         try:
             self._ensure_ready()
-            
-            # Split text into sentences for highlighting
-            sentences = split_into_sentences(self._text)
-            if not sentences:
-                sentences = [self._text]
-            
+            sentences = split_into_sentences(self._text) or [self._text]
+
             for sentence in sentences:
                 if self._should_stop:
                     break
-                
-                # Wait while paused
                 while self._is_paused and not self._should_stop:
                     threading.Event().wait(0.1)
-                
                 if self._should_stop:
                     break
-                
-                # Emit the sentence being spoken for highlighting
+
                 self.word_changed.emit(sentence)
-                
-                # Generate and play audio for this sentence
                 generator = self._pipeline(sentence, voice=self._voice, speed=self._speed)
-                
-                for graphemes, phonemes, audio in generator:
+
+                for _graphemes, _phonemes, audio in generator:
                     if self._should_stop:
                         break
-                    
-                    # Wait while paused
                     while self._is_paused and not self._should_stop:
                         threading.Event().wait(0.1)
-                    
                     if self._should_stop:
                         break
-                    
-                    # Convert audio tensor to int16 numpy
-                    if hasattr(audio, 'cpu'):
-                        arr = audio.cpu().numpy()
-                    else:
-                        arr = np.asarray(audio)
-                    
+
+                    arr = audio.cpu().numpy() if hasattr(audio, 'cpu') else np.asarray(audio)
                     arr16 = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16)
-                    
-                    # Play audio
+
                     with self._lock:
                         if self._should_stop:
                             break
                         try:
                             if self._play_obj is not None:
                                 self._play_obj.stop()
-                        except:
+                        except Exception:
                             pass
                         self._play_obj = sa.play_buffer(arr16.tobytes(), 1, 2, 24000)
-                    
-                    # Wait for playback
+
                     while True:
                         with self._lock:
                             if self._play_obj is None or not self._play_obj.is_playing():
@@ -172,18 +129,16 @@ class TTSEngine(QObject):
                                 if self._play_obj:
                                     try:
                                         self._play_obj.stop()
-                                    except:
+                                    except Exception:
                                         pass
                             break
-                        # Handle pause during playback
                         if self._is_paused:
                             with self._lock:
                                 if self._play_obj:
                                     try:
                                         self._play_obj.stop()
-                                    except:
+                                    except Exception:
                                         pass
-                            # Wait for resume
                             while self._is_paused and not self._should_stop:
                                 threading.Event().wait(0.1)
                             break
@@ -207,16 +162,16 @@ class TTSEngine(QObject):
             if self._play_obj:
                 try:
                     self._play_obj.stop()
-                except:
+                except Exception:
                     pass
                 self._play_obj = None
         
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-        
+
         self._is_speaking = False
         self._thread = None
-    
+
     def stop(self):
         """Stop speaking immediately."""
         self._full_stop()
