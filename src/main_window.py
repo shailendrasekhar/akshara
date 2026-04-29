@@ -614,6 +614,9 @@ class MainWindow(QMainWindow):
 
         if self._active_doc_id:
             self.store.update_last_page(self._active_doc_id, page_index + 1)
+            self.library.update_document_progress(
+                self.pdf_doc._file_path, page_index + 1
+            )
     
     def _zoom_in(self):
         if self.pdf_doc.zoom < 3.0:

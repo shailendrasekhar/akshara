@@ -13,7 +13,7 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QPainter, QFont, QPen
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QSizePolicy,
 )
 
@@ -112,6 +112,14 @@ class _DocCard(QWidget):
     def set_dark_mode(self, dark: bool):
         self._apply_theme(dark)
 
+    def update_progress(self, last_page: int):
+        """Update the progress bar and labels without rebuilding the card."""
+        self._progress_bar._current = last_page
+        self._progress_bar.update()
+        pct = round(last_page / self._progress_bar._total * 100)
+        self._pct_label.setText(f"{pct}%")
+        self._pages_label.setText(f"p. {last_page} / {self._progress_bar._total}")
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if os.path.isfile(self._path):
@@ -206,6 +214,13 @@ class LibraryPanel(QWidget):
         self._apply_theme()
         for card in self._cards:
             card.set_dark_mode(dark)
+
+    def update_document_progress(self, file_path: str, last_page: int):
+        """Update only the matching card's progress bar — no DB query needed."""
+        for card in self._cards:
+            if card._path == file_path:
+                card.update_progress(last_page)
+                return
 
     def refresh(self):
         # clear old cards
