@@ -30,6 +30,7 @@ from .library import LibraryPanel
 from .pdf_handler import PDFDocument
 from .pdf_viewer import PDFViewerWidget
 from .pomodoro import PomodoroPanel
+from .textmap import PageText
 from .tts_engine import TTSEngine
 from .ui.styles import get_main_stylesheet
 
@@ -186,6 +187,7 @@ class MainWindow(QMainWindow):
         self.store = Store()
         self._active_doc_id: str | None = None
         self._page_dwell_started_at: float | None = None
+        self._dwell_page = 0
 
         self.pomodoro = PomodoroPanel(self.store)
         self.pomodoro.phase_completed.connect(self._on_phase_completed)
@@ -288,6 +290,18 @@ class MainWindow(QMainWindow):
         library_action.triggered.connect(self._toggle_library)
         view_menu.addAction(library_action)
 
+        # Go menu — single source of truth for navigation keys (no keyPressEvent
+        # duplicates). Text inputs still get these keys via ShortcutOverride.
+        go_menu = menubar.addMenu("&Go")
+        prev_action = QAction("&Previous Page", self)
+        prev_action.setShortcut(QKeySequence(Qt.Key.Key_Left))
+        prev_action.triggered.connect(self._prev_page)
+        go_menu.addAction(prev_action)
+        next_action = QAction("&Next Page", self)
+        next_action.setShortcut(QKeySequence(Qt.Key.Key_Right))
+        next_action.triggered.connect(self._next_page)
+        go_menu.addAction(next_action)
+
         # Speech menu
         speech_menu = menubar.addMenu("&Speech")
 
@@ -303,9 +317,9 @@ class MainWindow(QMainWindow):
 
         speech_menu.addSeparator()
 
-        pause_action = QAction("&Pause/Resume", self)
+        pause_action = QAction("&Play/Pause", self)
         pause_action.setShortcut(QKeySequence("Space"))
-        pause_action.triggered.connect(self._toggle_pause)
+        pause_action.triggered.connect(self._play_or_pause)
         speech_menu.addAction(pause_action)
 
         stop_action = QAction("S&top", self)
@@ -579,22 +593,27 @@ class MainWindow(QMainWindow):
             self._active_doc_id = self.store.upsert_document(
                 file_path=file_path,
                 title=self.pdf_doc.title,
-                author=getattr(self.pdf_doc, "author", None),
+                author=self.pdf_doc.author,
                 pages=self.pdf_doc.page_count,
             )
             self.pomodoro.set_active_document(self._active_doc_id)
             self._page_dwell_started_at = time.time()
+            self._dwell_page = 0
             self.library.refresh()
             self.stacked_widget.setCurrentWidget(self.pdf_viewer)
             QTimer.singleShot(50, self._fit_and_load)
 
     def _fit_and_load(self):
+        doc = self.pdf_doc.document
+        if doc is None:
+            return
         self._fit_to_width()
-        self.pdf_viewer.load_document(
-            self.pdf_doc._doc,
-            self.pdf_doc.zoom,
-            self._dark_mode,
-        )
+        self.pdf_viewer.load_document(doc, self.pdf_doc.zoom, self._dark_mode)
+        # Resume where the reader left off (last_page is stored 1-based).
+        row = self.store.get_document(self._active_doc_id) if self._active_doc_id else None
+        if row and 1 < row.last_page <= self.pdf_doc.page_count:
+            self.pdf_viewer.go_to_page(row.last_page - 1)
+            self.status_label.setText(f"Resumed at page {row.last_page}")
 
     def _prev_page(self):
         cur = self.pdf_viewer.current_page
@@ -615,19 +634,18 @@ class MainWindow(QMainWindow):
         self.page_spin.setValue(page_index + 1)
         self.page_spin.blockSignals(False)
 
-        if self._active_doc_id and self._page_dwell_started_at and self.pomodoro._active:
+        session_id = self.pomodoro.active_session_id
+        if self._active_doc_id and self._page_dwell_started_at and session_id:
             elapsed = int(time.time() - self._page_dwell_started_at)
             if elapsed > 0:
-                self.store.add_page_view(
-                    self.pomodoro._active.db_id,
-                    page_index + 1,
-                    elapsed,
-                )
+                # Dwell time belongs to the page the reader is leaving.
+                self.store.add_page_view(session_id, self._dwell_page + 1, elapsed)
+        self._dwell_page = page_index
         self._page_dwell_started_at = time.time()
 
         if self._active_doc_id:
             self.store.update_last_page(self._active_doc_id, page_index + 1)
-            self.library.update_document_progress(self.pdf_doc._file_path, page_index + 1)
+            self.library.update_document_progress(self.pdf_doc.file_path, page_index + 1)
 
     def _zoom_in(self):
         if self.pdf_doc.zoom < 3.0:
@@ -659,7 +677,9 @@ class MainWindow(QMainWindow):
     def _play_page(self):
         if not self.pdf_doc.is_loaded:
             return
-        text = self.pdf_doc.extract_text(self.pdf_viewer.current_page)
+        doc = self.pdf_doc.document
+        assert doc is not None
+        text = PageText.from_page(doc[self.pdf_viewer.current_page]).text
         if text.strip():
             self.pdf_viewer.reset_read_position()
             self.tts_engine.speak(text)
@@ -673,6 +693,12 @@ class MainWindow(QMainWindow):
             self.tts_engine.speak(selected)
         else:
             self.status_label.setText("Select text on the PDF first")
+
+    def _play_or_pause(self):
+        if self.tts_engine.is_speaking:
+            self._toggle_pause()
+        elif self.pdf_doc.is_loaded:
+            self._play_page()
 
     def _toggle_pause(self):
         if self.tts_engine.is_speaking:
@@ -787,23 +813,6 @@ class MainWindow(QMainWindow):
             file_path = urls[0].toLocalFile()
             if file_path.lower().endswith(".pdf"):
                 self._load_pdf(file_path)
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Left:
-            self._prev_page()
-        elif event.key() == Qt.Key.Key_Right:
-            self._next_page()
-        elif event.key() == Qt.Key.Key_Space:
-            if self.tts_engine.is_speaking:
-                self._toggle_pause()
-            elif self.pdf_doc.is_loaded:
-                self._play_page()
-        elif event.key() == Qt.Key.Key_Escape:
-            self._stop()
-        elif event.key() == Qt.Key.Key_L:
-            self._toggle_library()
-        else:
-            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         self.tts_engine.cleanup()

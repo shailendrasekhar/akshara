@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .textmap import PageText
+
 
 @dataclass
 class TextSpan:
@@ -46,8 +48,7 @@ class PDFPageWidget(QWidget):
         self._pixmap: QPixmap | None = None
         self._text_spans: list[TextSpan] = []
         self._scale: float = 1.5
-        self._full_text: str = ""
-        self._span_char_ranges: list[tuple[int, int]] = []
+        self.page_text = PageText()
 
         self._selection_start: QPoint | None = None
         self._selection_end: QPoint | None = None
@@ -55,9 +56,7 @@ class PDFPageWidget(QWidget):
         self._is_selecting = False
         self._show_selection = True
 
-        self._tts_char_start: int = -1
-        self._tts_char_end: int = -1
-        self._tts_highlight_spans: list[int] = []
+        self._tts_rects: list[tuple[float, float, float, float]] = []
 
         self._selection_color = QColor(99, 102, 241, 80)
         self._tts_color = QColor(250, 204, 21, 150)
@@ -68,12 +67,19 @@ class PDFPageWidget(QWidget):
 
     # ---- content ----
 
-    def assign(self, page_index: int, pixmap: QPixmap, text_spans: list[TextSpan], scale: float):
+    def assign(
+        self,
+        page_index: int,
+        pixmap: QPixmap,
+        text_spans: list[TextSpan],
+        scale: float,
+        page_text: PageText,
+    ):
         self.page_index = page_index
         self._pixmap = pixmap
         self._text_spans = text_spans
         self._scale = scale
-        self._build_text_map()
+        self.page_text = page_text
         self.clear_selection()
         self.clear_tts_highlight()
         self.setFixedSize(pixmap.size())
@@ -83,8 +89,7 @@ class PDFPageWidget(QWidget):
         self.page_index = -1
         self._pixmap = None
         self._text_spans = []
-        self._full_text = ""
-        self._span_char_ranges = []
+        self.page_text = PageText()
         self.clear_selection()
         self.clear_tts_highlight()
         self.hide()
@@ -93,18 +98,6 @@ class PDFPageWidget(QWidget):
         return self._pixmap is not None
 
     # ---- text map ----
-
-    def _build_text_map(self):
-        parts = []
-        self._span_char_ranges = []
-        char_pos = 0
-        for span in self._text_spans:
-            start = char_pos
-            end = char_pos + len(span.text)
-            self._span_char_ranges.append((start, end))
-            parts.append(span.text)
-            char_pos = end + 1
-        self._full_text = " ".join(parts)
 
     # ---- selection / highlight ----
 
@@ -117,9 +110,7 @@ class PDFPageWidget(QWidget):
         self.update()
 
     def clear_tts_highlight(self):
-        self._tts_char_start = -1
-        self._tts_char_end = -1
-        self._tts_highlight_spans = []
+        self._tts_rects = []
         self.update()
 
     def hide_selection(self):
@@ -131,24 +122,14 @@ class PDFPageWidget(QWidget):
         self.update()
 
     def set_tts_highlight_by_position(self, char_start: int, char_end: int):
-        self._tts_char_start = char_start
-        self._tts_char_end = char_end
-        self._tts_highlight_spans = []
-        if char_start < 0 or char_end < 0:
-            self.update()
-            return
-        for i, (s, e) in enumerate(self._span_char_ranges):
-            if s < char_end and e > char_start:
-                self._tts_highlight_spans.append(i)
+        if char_start < 0 or char_end <= char_start:
+            self._tts_rects = []
+        else:
+            self._tts_rects = self.page_text.rects_for_range(char_start, char_end)
         self.update()
 
     def find_text_position(self, search_text: str, start_from: int = 0) -> tuple[int, int]:
-        search_clean = " ".join(search_text.lower().split())
-        full_clean = " ".join(self._full_text.lower().split())
-        pos = full_clean.find(search_clean, start_from)
-        if pos >= 0:
-            return pos, pos + len(search_clean)
-        return -1, -1
+        return self.page_text.find(search_text, start_from)
 
     def get_selected_text(self) -> str:
         if not self._selected_spans:
@@ -165,21 +146,14 @@ class PDFPageWidget(QWidget):
         if self._pixmap:
             painter.drawPixmap(0, 0, self._pixmap)
 
-        if self._tts_highlight_spans:
+        if self._tts_rects:
             painter.setBrush(QBrush(self._tts_color))
             painter.setPen(QPen(QColor(234, 179, 8), 2))
-            for idx in self._tts_highlight_spans:
-                if 0 <= idx < len(self._text_spans):
-                    span = self._text_spans[idx]
-                    rect = QRectF(
-                        span.bbox.x() * self._scale,
-                        span.bbox.y() * self._scale,
-                        span.bbox.width() * self._scale,
-                        span.bbox.height() * self._scale,
-                    )
-                    painter.drawRoundedRect(rect, 3, 3)
+            k = self._scale
+            for x0, y0, x1, y1 in self._tts_rects:
+                painter.drawRoundedRect(QRectF(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k), 3, 3)
 
-        if self._show_selection and self._selected_spans and not self._tts_highlight_spans:
+        if self._show_selection and self._selected_spans and not self._tts_rects:
             painter.setBrush(QBrush(self._selection_color))
             painter.setPen(Qt.PenStyle.NoPen)
             for idx in self._selected_spans:
@@ -337,12 +311,17 @@ class _Canvas(QWidget):
     # ---- pool management ----
 
     def assign_slot(
-        self, page_index: int, pixmap: QPixmap, text_spans: list[TextSpan], scale: float
+        self,
+        page_index: int,
+        pixmap: QPixmap,
+        text_spans: list[TextSpan],
+        scale: float,
+        page_text: PageText,
     ):
         if page_index in self._slot_for_page:
             slot = self._slot_for_page[page_index]
             pw = self._pool[slot]
-            pw.assign(page_index, pixmap, text_spans, scale)
+            pw.assign(page_index, pixmap, text_spans, scale, page_text)
             pw.move(
                 (self.width() - pixmap.width()) // 2,
                 self._page_tops[page_index],
@@ -363,7 +342,7 @@ class _Canvas(QWidget):
 
         self._slot_for_page[page_index] = slot
         pw = self._pool[slot]
-        pw.assign(page_index, pixmap, text_spans, scale)
+        pw.assign(page_index, pixmap, text_spans, scale, page_text)
         pw.move(
             (self.width() - pixmap.width()) // 2,
             self._page_tops[page_index],
@@ -641,7 +620,9 @@ class PDFViewerWidget(QWidget):
             )
             pixmap = QPixmap.fromImage(img.copy())
             text_spans = self._extract_text_spans(page)
-            self._canvas.assign_slot(page_index, pixmap, text_spans, scale)
+            self._canvas.assign_slot(
+                page_index, pixmap, text_spans, scale, PageText.from_page(page)
+            )
         except Exception:
             pass
 

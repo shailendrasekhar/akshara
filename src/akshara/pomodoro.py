@@ -146,6 +146,12 @@ class PomodoroPanel(QWidget):
     # public API
     def set_active_document(self, doc_id: str | None) -> None:
         self._doc_id = doc_id
+        if doc_id and self._active is not None:
+            self.store.attach_session(self._active.db_id, doc_id)
+
+    @property
+    def active_session_id(self) -> int | None:
+        return self._active.db_id if self._active else None
 
     def set_dark_mode(self, dark: bool) -> None:
         self.ring.set_dark(dark)
@@ -290,7 +296,7 @@ class PomodoroPanel(QWidget):
         if self._active is None:
             self._active = _ActiveSession(
                 db_id=self.store.start_session(
-                    self._doc_id or "unattached",
+                    self._doc_id,
                     self._phase,
                     self._total,
                 ),

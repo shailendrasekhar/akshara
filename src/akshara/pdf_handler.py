@@ -43,6 +43,21 @@ class PDFDocument(QObject):
             return self._file_path.split("/")[-1] if self._file_path else "Untitled"
         return ""
 
+    @property
+    def author(self) -> str | None:
+        if self._doc:
+            meta = self._doc.metadata or {}
+            return (meta.get("author") or "").strip() or None
+        return None
+
+    @property
+    def document(self) -> fitz.Document | None:
+        return self._doc
+
+    @property
+    def file_path(self) -> str:
+        return self._file_path
+
     def load(self, file_path: str) -> bool:
         try:
             self.close()
