@@ -29,13 +29,17 @@ def test_reopen_resumes_last_page(qtbot, sample_pdf):
 
     w = MainWindow()
     qtbot.addWidget(w)
+    w.resize(900, 700)
     w._load_pdf(str(sample_pdf))
-    qtbot.wait(100)
     assert w.pdf_doc.author == "Jane Doe"
-    w.store.update_last_page(w._active_doc_id, 3)
+    w.pdf_viewer.go_to_page(2)
+    qtbot.waitUntil(lambda: w.pdf_viewer.current_page == 2)
+    w.close_document()
+    assert w.store.list_documents()[0].last_page == 3
+
     w._load_pdf(str(sample_pdf))
-    qtbot.wait(100)
     assert "Resumed at page 3" in w.status_label.text()
+    qtbot.waitUntil(lambda: w.pdf_viewer.current_page == 2)
 
 
 def test_pomodoro_before_pdf(qtbot):
@@ -47,3 +51,16 @@ def test_pomodoro_before_pdf(qtbot):
     w.pomodoro.toggle()
     assert w.pomodoro.active_session_id is not None
     w.pomodoro.reset()
+
+
+def test_splash_runs_to_completion(qtbot):
+    from akshara.main_window import MainWindow
+    from akshara.splash_screen import SplashController
+    from akshara.ui.theme import SEPIA
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    splash = SplashController(w, palette=SEPIA)
+    with qtbot.waitSignal(splash.splash.finished, timeout=6000):
+        splash.start()
+    assert w.isVisible()

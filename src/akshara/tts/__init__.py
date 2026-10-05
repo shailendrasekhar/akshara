@@ -20,7 +20,10 @@ def create_engine(preferred: str = "kokoro", parent: QObject | None = None) -> S
     for key in order:
         cls = ENGINES.get(key)
         if cls is not None and cls.is_available():
-            return cls(parent)
+            try:
+                return cls(parent)
+            except Exception:  # backend present but unusable (e.g. no audio daemon)
+                continue
     return None
 
 

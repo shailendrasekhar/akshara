@@ -539,6 +539,73 @@ class Store:
                 break
         return streak
 
+    def daily_series(self, days: int = 28, today: dt.date | None = None) -> list[dict]:
+        """One row per calendar day (oldest first), including days with no activity."""
+        today = today or dt.date.today()
+        by_day = {r["d"]: r for r in self.daily_totals(days + 1)}
+        out = []
+        for i in range(days - 1, -1, -1):
+            d = (today - dt.timedelta(days=i)).isoformat()
+            r = by_day.get(d)
+            out.append(
+                {
+                    "d": d,
+                    "focus_s": (r["focus_s"] or 0) if r else 0,
+                    "break_s": (r["break_s"] or 0) if r else 0,
+                    "n": r["n"] if r else 0,
+                }
+            )
+        return out
+
+    def best_streak_days(self) -> int:
+        rows = self._conn.execute(
+            "SELECT DISTINCT date(started_at, 'unixepoch', 'localtime') AS d FROM sessions "
+            "WHERE phase = 'focus' ORDER BY d"
+        ).fetchall()
+        best = run = 0
+        prev: dt.date | None = None
+        for r in rows:
+            day = dt.date.fromisoformat(r["d"])
+            run = run + 1 if prev and day - prev == dt.timedelta(days=1) else 1
+            best = max(best, run)
+            prev = day
+        return best
+
+    def export_sessions_csv(self, path: str) -> int:
+        """Write every session to CSV. Returns the number of rows written."""
+        import csv
+
+        rows = self._conn.execute(
+            """
+            SELECT s.id, datetime(s.started_at, 'unixepoch', 'localtime') AS started,
+                   datetime(s.ended_at, 'unixepoch', 'localtime') AS ended,
+                   s.phase, s.duration_s, s.completed, s.pages_read, s.words_heard,
+                   d.title, d.author, d.path
+            FROM sessions s LEFT JOIN documents d ON d.id = s.document_id
+            ORDER BY s.started_at
+            """
+        ).fetchall()
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(
+                [
+                    "id",
+                    "started",
+                    "ended",
+                    "phase",
+                    "duration_s",
+                    "completed",
+                    "pages_read",
+                    "words_heard",
+                    "title",
+                    "author",
+                    "path",
+                ]
+            )
+            for r in rows:
+                w.writerow(list(r))
+        return len(rows)
+
     def file_size(self) -> int:
         try:
             return self.path.stat().st_size

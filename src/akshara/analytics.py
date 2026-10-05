@@ -1,9 +1,8 @@
 """
-Analytics dialog for Akshara — reads from db.Store, paints minimal charts.
+Analytics dialog — reads from db.Store and paints minimal, theme-aware charts.
 
-Usage:
-    dlg = AnalyticsDialog(store, parent=main_window, dark_mode=True)
-    dlg.exec()
+All time series are calendar-aligned (days without sessions are shown as
+empty), so the heatmap and weekly bars line up with real dates.
 """
 
 from __future__ import annotations
@@ -15,9 +14,12 @@ from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -25,63 +27,78 @@ from PyQt6.QtWidgets import (
 )
 
 from .db import Store
+from .ui.theme import DARK, FONT_FAMILY, MONO_FONT, Palette
+
+DAYS = 28
+
+
+def _mix(a: QColor, b: QColor, t: float) -> QColor:
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        int(a.red() + (b.red() - a.red()) * t),
+        int(a.green() + (b.green() - a.green()) * t),
+        int(a.blue() + (b.blue() - a.blue()) * t),
+    )
+
 
 # ---------- Heatmap ----------------------------------------------------------
 
 
 class _Heatmap(QWidget):
-    def __init__(self, daily: list[dict], dark: bool, parent=None):
+    """One square per day for the last 28 days, oldest at the left."""
+
+    def __init__(self, series: list[dict], palette: Palette, parent=None):
         super().__init__(parent)
-        self._daily = daily
-        self._dark = dark
-        self.setMinimumHeight(70)
+        self._series = series
+        self._P = palette
+        self.setMinimumHeight(64)
+        self.setToolTip("Focused reading per day (darker/brighter = more)")
 
     def paintEvent(self, _):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        cols = 28
+        cols = max(1, len(self._series))
         gap = 3
-        size = (self.width() - gap * (cols - 1)) / cols
-        max_focus = max((d["focus_s"] for d in self._daily), default=1) or 1
-        # right-align: pad with empty days at the front if we have fewer than 28
-        pad = cols - len(self._daily)
-        bg = QColor("#141414") if self._dark else QColor("#f3f3f2")
-        for i in range(cols):
-            x = i * (size + gap)
-            w = 0 if i < pad else self._daily[i - pad]["focus_s"] / max_focus
-            if w == 0:
-                col = bg
-            else:
-                # grayscale ramp
-                L = 0.10 + w * 0.90 if self._dark else 0.95 - w * 0.92
-                v = int(L * 255)
-                col = QColor(v, v, v)
-            p.fillRect(QRectF(x, 0, size, size), col)
+        size = min(40.0, (self.width() - gap * (cols - 1)) / cols)
+        max_focus = max((d["focus_s"] for d in self._series), default=0) or 1
+        empty = QColor(self._P.bg_elevated)
+        full = QColor(self._P.accent)
+        for i, d in enumerate(self._series):
+            w = d["focus_s"] / max_focus
+            col = empty if w == 0 else _mix(QColor(self._P.border_light), full, 0.25 + 0.75 * w)
+            p.fillRect(QRectF(i * (size + gap), 0, size, size), col)
+        p.setPen(QColor(self._P.text_muted))
+        p.setFont(QFont("monospace", 8))
+        if self._series:
+            first = dt.date.fromisoformat(self._series[0]["d"]).strftime("%d %b")
+            p.drawText(QRectF(0, size + 4, 80, 16), Qt.AlignmentFlag.AlignLeft, first)
+            p.drawText(
+                QRectF(self.width() - 80, size + 4, 80, 16), Qt.AlignmentFlag.AlignRight, "today"
+            )
 
 
 # ---------- Bar chart --------------------------------------------------------
 
 
 class _Bars(QWidget):
-    def __init__(self, daily: list[dict], dark: bool, parent=None):
+    """Focus (solid) and break (muted) minutes for the last 7 days."""
+
+    def __init__(self, series: list[dict], palette: Palette, parent=None):
         super().__init__(parent)
-        self._daily = daily[-7:]
-        self._dark = dark
+        self._series = series[-7:]
+        self._P = palette
         self.setMinimumHeight(140)
 
     def paintEvent(self, _):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        ink = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
-        muted = QColor("#666666") if self._dark else QColor("#cfcfca")
-        label = QColor("#9a9a96")
-        cols = 7
+        ink, muted, label = (
+            QColor(c) for c in (self._P.text, self._P.border_light, self._P.text_muted)
+        )
         bw = 18
         chart_h = self.height() - 24
-        avail_w = self.width()
-        col_w = avail_w / cols
-        max_total = max((d["focus_s"] + d["break_s"] for d in self._daily), default=1) or 1
-        for i, d in enumerate(self._daily):
+        col_w = self.width() / max(1, len(self._series))
+        max_total = max((d["focus_s"] + d["break_s"] for d in self._series), default=0) or 1
+        p.setFont(QFont("monospace", 8))
+        for i, d in enumerate(self._series):
             x = i * col_w + (col_w - bw) / 2
             f = d["focus_s"] / max_total * chart_h
             b = d["break_s"] / max_total * chart_h
@@ -89,11 +106,10 @@ class _Bars(QWidget):
             p.fillRect(QRectF(x, chart_h - f - b, bw, b), muted)
             day = dt.date.fromisoformat(d["d"])
             p.setPen(label)
-            p.setFont(QFont("monospace", 8))
             p.drawText(
                 QRectF(x - 6, chart_h + 4, bw + 12, 18),
                 Qt.AlignmentFlag.AlignHCenter,
-                "MTWTFSS"[day.weekday()],  # date.weekday(): Monday == 0,
+                "MTWTFSS"[day.weekday()],  # date.weekday(): Monday == 0
             )
 
 
@@ -103,27 +119,22 @@ class _Bars(QWidget):
 class _Histogram(QWidget):
     BUCKETS: ClassVar[list[str]] = ["5–15 min", "15–25 min", "25–35 min", "35–45 min", "45+ min"]
 
-    def __init__(self, hist: list[tuple[str, int]], dark: bool, parent=None):
+    def __init__(self, hist: list[tuple[str, int]], palette: Palette, parent=None):
         super().__init__(parent)
-        self._dark = dark
+        self._P = palette
         m = dict(hist)
         self._values = [(b, m.get(b, 0)) for b in self.BUCKETS]
-        self.setMinimumHeight(140)
+        self.setMinimumHeight(len(self.BUCKETS) * 22 + 8)
 
     def paintEvent(self, _):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        ink = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
-        track = QColor("#222222") if self._dark else QColor("#f0f0f0")
-        text = QColor("#9a9a96")
-        labw = 80
-        valw = 36
-        rowh = 22
+        ink, track, text = (QColor(c) for c in (self._P.text, self._P.border, self._P.text_muted))
+        labw, valw, rowh = 80, 36, 22
         max_v = max(v for _, v in self._values) or 1
+        p.setFont(QFont("monospace", 9))
         for i, (label, v) in enumerate(self._values):
             y = i * rowh + 4
             p.setPen(text)
-            p.setFont(QFont("monospace", 9))
             p.drawText(QRectF(0, y, labw, rowh), Qt.AlignmentFlag.AlignVCenter, label)
             barx = labw + 8
             barw = self.width() - labw - valw - 16
@@ -137,86 +148,73 @@ class _Histogram(QWidget):
             )
 
 
-# ---------- Stat tile --------------------------------------------------------
+# ---------- Building blocks --------------------------------------------------
 
 
-def _stat_tile(value: str, suffix: str, label: str, sub: str, dark: bool) -> QWidget:
+def _stat_tile(value: str, suffix: str, label: str, sub: str, P: Palette) -> QWidget:
     w = QWidget()
     L = QVBoxLayout(w)
-    L.setContentsMargins(0, 14, 16, 14)
+    L.setContentsMargins(0, 12, 16, 12)
     L.setSpacing(2)
     big = QLabel(value + (f" <small>{suffix}</small>" if suffix else ""))
     big.setTextFormat(Qt.TextFormat.RichText)
-    big.setStyleSheet(
-        f"font-family:Georgia,serif;font-size:30px;color:{'#fff' if dark else '#0a0a0a'};"
-        "letter-spacing:-0.5px;"
-    )
+    big.setStyleSheet(f"font-family:{FONT_FAMILY};font-size:28px;color:{P.text};")
     k = QLabel(label.upper())
-    k.setStyleSheet(
-        f"font-size:10px;letter-spacing:2px;color:{'#9a9a96' if dark else '#6b6b68'};"
-        "margin-top:6px;"
-    )
+    k.setStyleSheet(f"font-size:10px;letter-spacing:2px;color:{P.text_secondary};margin-top:6px;")
     s = QLabel(sub)
-    s.setStyleSheet(
-        f"font-family:monospace;font-size:10px;color:{'#9a9a96' if dark else '#6b6b68'};"
-    )
-    L.addWidget(big)
-    L.addWidget(k)
-    L.addWidget(s)
+    s.setStyleSheet(f"font-family:{MONO_FONT};font-size:10px;color:{P.text_muted};")
+    for x in (big, k, s):
+        L.addWidget(x)
     return w
 
 
-# ---------- Section heading --------------------------------------------------
-
-
-def _section(title: str, sub: str, dark: bool) -> QWidget:
+def _section(title: str, sub: str, P: Palette) -> QWidget:
     w = QWidget()
     L = QHBoxLayout(w)
-    L.setContentsMargins(0, 16, 0, 8)
+    L.setContentsMargins(0, 18, 0, 8)
     a = QLabel(title.upper())
-    a.setStyleSheet(
-        f"font-size:10px;letter-spacing:2.5px;color:{'#9a9a96' if dark else '#6b6b68'};"
-    )
+    a.setStyleSheet(f"font-size:10px;letter-spacing:2.5px;color:{P.text_secondary};")
     b = QLabel(sub)
-    b.setStyleSheet(
-        f"font-family:monospace;font-size:10px;color:{'#9a9a96' if dark else '#6b6b68'};"
-    )
+    b.setStyleSheet(f"font-family:{MONO_FONT};font-size:10px;color:{P.text_muted};")
     L.addWidget(a)
     L.addStretch(1)
     L.addWidget(b)
     return w
 
 
+def _rule() -> QFrame:
+    f = QFrame()
+    f.setProperty("role", "rule")
+    return f
+
+
+def _fmt_hm(seconds: int) -> tuple[str, str]:
+    minutes = seconds // 60
+    return f"{minutes // 60}", f"h {minutes % 60}m"
+
+
 # ---------- Dialog -----------------------------------------------------------
 
 
 class AnalyticsDialog(QDialog):
-    def __init__(self, store: Store, parent=None, dark_mode: bool = True):
+    def __init__(self, store: Store, parent=None, palette: Palette = DARK):
         super().__init__(parent)
-        self.setWindowTitle("Akshara — Time analysis")
-        self.resize(680, 760)
-        self._dark = dark_mode
-
-        bg = "#000" if dark_mode else "#fff"
-        ink = "#fff" if dark_mode else "#0a0a0a"
-        line = "#222" if dark_mode else "#e6e6e2"
-        self.setStyleSheet(f"""
-            QDialog {{ background:{bg}; }}
-            QLabel {{ color:{ink}; }}
-            QFrame[role="rule"] {{ background:{line}; max-height:1px; min-height:1px; border:none; }}
-            QPushButton {{
-                background:transparent; color:{ink}; border:1px solid {line};
-                padding:8px 14px; border-radius:4px; font-size:11px; letter-spacing:1.5px;
-            }}
-            QPushButton:hover {{ background:{"#1a1a1a" if dark_mode else "#ececeb"}; }}
-        """)
+        self.store = store
+        self.setWindowTitle("Akshara — Reading analytics")
+        self.resize(700, 780)
+        P = palette
+        self.setStyleSheet(
+            f"""
+            QDialog {{ background:{P.bg}; }}
+            QFrame[role="rule"] {{ background:{P.border}; max-height:1px; min-height:1px; border:none; }}
+            """
+        )
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         body = QWidget()
         scroll.setWidget(body)
-
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
@@ -224,104 +222,93 @@ class AnalyticsDialog(QDialog):
         L.setContentsMargins(28, 24, 28, 24)
         L.setSpacing(0)
 
-        # Title
         h = QLabel("Time, in depth")
-        h.setStyleSheet(f"font-family:Georgia,serif;font-size:26px;color:{ink};")
+        h.setStyleSheet(f"font-family:{FONT_FAMILY};font-size:26px;color:{P.text};")
         L.addWidget(h)
-        sub = QLabel("LAST 28 DAYS · LOCAL DATABASE")
+        sub = QLabel(f"LAST {DAYS} DAYS · LOCAL DATABASE")
         sub.setStyleSheet(
-            f"font-size:10px;letter-spacing:2.5px;color:{'#9a9a96' if dark_mode else '#6b6b68'};margin-bottom:16px;"
+            f"font-size:10px;letter-spacing:2.5px;color:{P.text_muted};margin-bottom:12px;"
         )
         L.addWidget(sub)
 
-        # KPIs
-        s = store.summary(28)
-        total_min = s["total_s"] // 60
-        avg_min = (s["avg_s"] or 0) // 60
-        comp_pct = round((s["done"] / s["n"]) * 100) if s["n"] else 0
+        s = store.summary(DAYS)
+        series = store.daily_series(DAYS)
+        comp_pct = round(s["done"] / s["n"] * 100) if s["n"] else 0
+        streak, best = store.streak_days(), store.best_streak_days()
 
-        # streak
-        daily = store.daily_totals(60)
-        streak = 0
-        for row in reversed(daily):
-            if row["focus_s"] >= 25 * 60:
-                streak += 1
-            else:
-                break
-
-        kpi_row = QHBoxLayout()
-        kpi_row.setSpacing(0)
-        kpi_row.addWidget(
+        grid = QGridLayout()
+        grid.setSpacing(0)
+        hrs, rest = _fmt_hm(s["total_s"])
+        tiles = [
+            _stat_tile(hrs, rest, "Focused reading", f"{s['n']} sessions", P),
             _stat_tile(
-                f"{total_min // 60}",
-                f"h {total_min % 60}m",
-                "Focused reading",
-                f"{s['n']} sessions",
-                dark_mode,
+                f"{s['avg_s'] // 60}", "min avg", "Per session", f"completion {comp_pct}%", P
             ),
-            1,
-        )
-        kpi_row.addWidget(
-            _stat_tile(
-                f"{avg_min}", "min · avg", "Per session", f"completion {comp_pct}%", dark_mode
-            ),
-            1,
-        )
-        kpi_row.addWidget(
-            _stat_tile(f"{streak}", "days", "Current streak", "best: 11d", dark_mode), 1
-        )
-        L.addLayout(kpi_row)
+            _stat_tile(f"{streak}", "days", "Current streak", f"best: {best}d", P),
+            _stat_tile(f"{s['pages']}", "pages", "Pages read", "during focus sessions", P),
+            _stat_tile(f"{s['words']:,}", "words", "Heard aloud", "via text-to-speech", P),
+            _stat_tile(f"{len(store.list_documents())}", "books", "In library", "all time", P),
+        ]
+        for i, t in enumerate(tiles):
+            grid.addWidget(t, i // 3, i % 3)
+        L.addLayout(grid)
+        L.addWidget(_rule())
 
-        rule = QFrame()
-        rule.setProperty("role", "rule")
-        L.addWidget(rule)
+        L.addWidget(_section("Activity heatmap", f"{DAYS} days", P))
+        L.addWidget(_Heatmap(series, P))
+        L.addWidget(_section("Last 7 days", "focus / break", P))
+        L.addWidget(_Bars(series, P))
+        L.addWidget(_section("Session length distribution", f"n = {s['n']}", P))
+        L.addWidget(_Histogram(store.session_length_histogram(DAYS), P))
 
-        # Heatmap
-        L.addWidget(_section("Activity heatmap", "4 weeks", dark_mode))
-        L.addWidget(_Heatmap(daily[-28:], dark_mode))
-
-        # Bars
-        L.addWidget(_section("This week", "focus / break", dark_mode))
-        L.addWidget(_Bars(daily, dark_mode))
-
-        # Histogram
-        L.addWidget(_section("Session length distribution", f"n = {s['n']}", dark_mode))
-        L.addWidget(_Histogram(store.session_length_histogram(28), dark_mode))
-
-        # Per-document
-        L.addWidget(_section("Time per document", "all-time", dark_mode))
-        for doc in store.per_document_time():
+        L.addWidget(_section("Time per document", "all-time", P))
+        docs = [d for d in store.per_document_time() if d["total_s"] > 0]
+        if not docs:
+            none = QLabel(
+                "No focus sessions linked to a book yet — start the Pomodoro timer while reading."
+            )
+            none.setObjectName("muted")
+            none.setWordWrap(True)
+            L.addWidget(none)
+        for doc in docs:
             row = QWidget()
             R = QHBoxLayout(row)
             R.setContentsMargins(0, 8, 0, 8)
-            name = QLabel(doc["title"])
-            name.setStyleSheet(f"font-family:Georgia,serif;font-size:13px;color:{ink};")
-            sub = QLabel(f"{doc['author'] or '—'} · {doc['session_n']} sessions")
-            sub.setStyleSheet(
-                f"font-family:monospace;font-size:10px;color:{'#9a9a96' if dark_mode else '#6b6b68'};"
-            )
             col = QVBoxLayout()
+            name = QLabel(doc["title"])
+            name.setStyleSheet(f"font-family:{FONT_FAMILY};font-size:13px;color:{P.text};")
+            meta = QLabel(f"{doc['author'] or '—'} · {doc['session_n']} sessions")
+            meta.setStyleSheet(f"font-family:{MONO_FONT};font-size:10px;color:{P.text_muted};")
             col.addWidget(name)
-            col.addWidget(sub)
+            col.addWidget(meta)
             R.addLayout(col, 1)
-            hours = doc["total_s"] / 3600
-            num = QLabel(f"{hours:.1f}<small> HOURS</small>")
+            num = QLabel(f"{doc['total_s'] / 3600:.1f}<small> HOURS</small>")
             num.setTextFormat(Qt.TextFormat.RichText)
-            num.setStyleSheet(f"font-family:Georgia,serif;font-size:16px;color:{ink};")
+            num.setStyleSheet(f"font-family:{FONT_FAMILY};font-size:16px;color:{P.text};")
             R.addWidget(num)
             L.addWidget(row)
-            sep = QFrame()
-            sep.setProperty("role", "rule")
-            L.addWidget(sep)
+            L.addWidget(_rule())
 
-        # Footer
+        L.addSpacing(16)
         foot = QHBoxLayout()
         info = QLabel(f"akshara.db · {store.file_size() // 1024} KB · {store.path}")
-        info.setStyleSheet(
-            f"font-family:monospace;font-size:10px;color:{'#9a9a96' if dark_mode else '#6b6b68'};"
-        )
-        close = QPushButton("CLOSE")
+        info.setStyleSheet(f"font-family:{MONO_FONT};font-size:10px;color:{P.text_muted};")
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        export = QPushButton("Export CSV…")
+        export.setAutoDefault(False)
+        export.clicked.connect(self._export)
+        close = QPushButton("Close")
+        close.setObjectName("accentButton")
         close.clicked.connect(self.accept)
         foot.addWidget(info, 1)
+        foot.addWidget(export)
         foot.addWidget(close)
         L.addLayout(foot)
+
+    def _export(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export sessions", "akshara-sessions.csv", "CSV files (*.csv)"
+        )
+        if path:
+            n = self.store.export_sessions_csv(path)
+            QMessageBox.information(self, "Exported", f"Wrote {n} sessions to {path}")

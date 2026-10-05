@@ -7,10 +7,11 @@ import os
 import sys
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import QApplication
 
 from . import APP_ID, APP_NAME, __version__
+from .resources import resource_path
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -36,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)
     app.setDesktopFileName(APP_ID)
+    icon = resource_path("icons", "akshara.png")
+    if icon.exists():
+        app.setWindowIcon(QIcon(str(icon)))
 
     font = QFont("Georgia", 10)
     font.setStyleHint(QFont.StyleHint.Serif)
@@ -47,13 +51,22 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow()
 
-    if args.pdf and os.path.isfile(args.pdf) and args.pdf.lower().endswith(".pdf"):
-        window._load_pdf(os.path.abspath(args.pdf))
-
-    if args.no_splash:
-        window.showMaximized()
+    if args.pdf:
+        path = os.path.abspath(args.pdf)
+        if os.path.isfile(path):
+            window.open_file(path)
+        else:
+            window.status_label.setText(f"File not found: {args.pdf}")
     else:
-        splash = SplashController(window, dark_mode=window._dark_mode)
+        window.restore_session()
+
+    splash = None
+    if args.no_splash or not window.settings.show_splash:
+        window.show()
+    else:
+        splash = SplashController(window, palette=window.palette_)
         splash.start()
 
-    return app.exec()
+    code = app.exec()
+    del splash
+    return code

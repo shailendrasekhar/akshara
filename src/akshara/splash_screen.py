@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .resources import resource_path
+from .ui.theme import DARK, Palette
 
 # ---------- Logo widget (pure QPainter, no graphics effects on children) ------
 
@@ -37,9 +38,9 @@ class _Logo(QWidget):
     QGraphicsOpacityEffect on this widget is safe and unambiguous.
     """
 
-    def __init__(self, size: int, dark: bool, image_path: Path | None = None, parent=None):
+    def __init__(self, size: int, palette: Palette, image_path: Path | None = None, parent=None):
         super().__init__(parent)
-        self._dark = dark
+        self._palette = palette
         self._pixmap: QPixmap | None = None
         if image_path and image_path.exists():
             pm = QPixmap(str(image_path))
@@ -52,9 +53,9 @@ class _Logo(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        ink = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
-        bg = QColor("#000000") if self._dark else QColor("#ffffff")
-        rim = QColor("#2a2a2a") if self._dark else QColor("#e0e0dc")
+        ink = QColor(self._palette.text)
+        bg = QColor(self._palette.bg)
+        rim = QColor(self._palette.border_light)
 
         d = min(self.width(), self.height()) - 2
         r = QRect(1, 1, d, d)
@@ -104,12 +105,12 @@ class SplashScreen(QWidget):
     _CORNER_X = 16
     _CORNER_Y = 54  # below menu bar / title bar
 
-    def __init__(self, main_window: QMainWindow, dark_mode: bool = True):
+    def __init__(self, main_window: QMainWindow, palette: Palette = DARK):
         super().__init__(None)
         self._win = main_window
-        self._dark = dark_mode
+        self._palette = palette
 
-        bg = "#000000" if dark_mode else "#ffffff"
+        bg = palette.bg
         self.setStyleSheet(f"background:{bg};")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -124,7 +125,7 @@ class SplashScreen(QWidget):
 
         # Logo — large, centred
         logo_path = resource_path("icons", "logo.png")
-        self._logo = _Logo(self._LOGO_LARGE, dark_mode, logo_path, parent=self)
+        self._logo = _Logo(self._LOGO_LARGE, palette, logo_path, parent=self)
 
         cx = (screen.width() - self._LOGO_LARGE) // 2
         cy = (screen.height() - self._LOGO_LARGE) // 2
@@ -132,8 +133,8 @@ class SplashScreen(QWidget):
         self._logo_start_rect = QRect(cx, cy, self._LOGO_LARGE, self._LOGO_LARGE)
 
         # Wordmark below logo
-        ink = "#ffffff" if dark_mode else "#0a0a0a"
-        muted = "#888888" if dark_mode else "#777777"
+        ink = palette.text
+        muted = palette.text_muted
         from PyQt6.QtWidgets import QLabel
 
         self._title = QLabel("AKSHARA", self)
@@ -269,9 +270,9 @@ class SplashScreen(QWidget):
 
 
 class SplashController:
-    def __init__(self, main_window: QMainWindow, dark_mode: bool = True):
+    def __init__(self, main_window: QMainWindow, palette: Palette = DARK):
         self.main_window = main_window
-        self.splash = SplashScreen(main_window, dark_mode=dark_mode)
+        self.splash = SplashScreen(main_window, palette=palette)
         self.splash.finished.connect(self._cleanup)
 
     def start(self):

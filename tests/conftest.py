@@ -14,6 +14,7 @@ def _isolated_data_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     """Keep every test away from the real user database and settings."""
     monkeypatch.setenv("AKSHARA_DB", str(tmp_path / "akshara.db"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("AKSHARA_CONFIG", str(tmp_path / "config" / "settings.ini"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
 
 

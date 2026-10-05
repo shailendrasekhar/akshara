@@ -31,6 +31,8 @@ class SystemEngine(SpeechEngine):
             engines = QTextToSpeech.availableEngines()
             engine_name = next((e for e in engines if e != "mock"), engines[0] if engines else "")
         self._tts = QTextToSpeech(engine_name, self) if engine_name else QTextToSpeech(self)
+        if self._tts.state() == QTextToSpeech.State.Error:
+            raise RuntimeError(f"speech engine {engine_name!r} failed: {self._tts.errorString()}")
         self._tts.stateChanged.connect(self._on_tts_state)
         self._tts.errorOccurred.connect(self._on_tts_error)
         self._queue: deque[Utterance] = deque()

@@ -1,3 +1,5 @@
+"""Pomodoro timer panel (right dock)."""
+
 from __future__ import annotations
 
 import time
@@ -17,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .db import Store
+from .ui.theme import DARK, MONO_FONT, Palette
 
 # ---------- Defaults ---------------------------------------------------------
 
@@ -24,6 +27,8 @@ PRESETS_MIN = (15, 25, 45, 50)
 SHORT_BREAK_S = 5 * 60
 LONG_BREAK_S = 15 * 60
 CYCLES_PER_LONG = 4
+
+PHASE_LABELS = {"focus": "Deep Focus", "break": "Short Break", "long": "Long Break"}
 
 
 # ---------- Ring widget ------------------------------------------------------
@@ -34,12 +39,12 @@ class _Ring(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(220, 220)
+        self.setMinimumSize(200, 200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._remaining = 25 * 60
         self._total = 25 * 60
         self._phase = "focus"
-        self._dark = True
+        self._palette = DARK
 
     def set_state(self, remaining: int, total: int, phase: str) -> None:
         self._remaining = remaining
@@ -47,44 +52,34 @@ class _Ring(QWidget):
         self._phase = phase
         self.update()
 
-    def set_dark(self, dark: bool) -> None:
-        self._dark = dark
+    def set_palette(self, palette: Palette) -> None:
+        self._palette = palette
         self.update()
 
     def paintEvent(self, _):
+        P = self._palette
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        bg = QColor("#000000") if self._dark else QColor("#ffffff")
-        p.fillRect(self.rect(), bg)
-        ink = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
-        line = QColor("#222222") if self._dark else QColor("#e6e6e2")
-        muted = QColor("#9a9a96") if self._dark else QColor("#6b6b68")
-        accent = QColor("#d8a85a")
+        p.fillRect(self.rect(), QColor(P.bg))
+        ink, line, muted, accent = (QColor(c) for c in (P.text, P.border, P.text_muted, P.accent))
 
         side = min(self.width(), self.height()) - 16
         rect = QRectF((self.width() - side) / 2, (self.height() - side) / 2, side, side)
-
-        # track
-        pen = QPen(line, 2)
-        p.setPen(pen)
+        p.setPen(QPen(line, 2))
         p.drawArc(rect, 0, 360 * 16)
 
-        # progress
         frac = max(0.0, min(1.0, self._remaining / self._total))
-        span = int(360 * 16 * frac)
-        pen2 = QPen(accent if self._phase != "focus" else ink, 2)
-        pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen2)
-        p.drawArc(rect, 90 * 16, -span)
+        pen = QPen(accent if self._phase != "focus" else ink, 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawArc(rect, 90 * 16, -int(360 * 16 * frac))
 
-        # time
-        mm = self._remaining // 60
-        ss = self._remaining % 60
-        big = QFont("Georgia", 38, QFont.Weight.Light)
-        p.setFont(big)
+        mm, ss = divmod(self._remaining, 60)
+        p.setFont(QFont("Georgia", max(18, int(side / 7)), QFont.Weight.Light))
         p.setPen(ink)
-        text_rect = rect.adjusted(0, -10, 0, -10)
-        p.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, f"{mm:02d}:{ss:02d}")
+        p.drawText(
+            rect.adjusted(0, -10, 0, -10), Qt.AlignmentFlag.AlignCenter, f"{mm:02d}:{ss:02d}"
+        )
 
         small = QFont()
         small.setPointSize(8)
@@ -92,8 +87,11 @@ class _Ring(QWidget):
         small.setCapitalization(QFont.Capitalization.AllUppercase)
         p.setFont(small)
         p.setPen(muted)
-        label = {"focus": "Deep Focus", "break": "Short Break", "long": "Long Break"}[self._phase]
-        p.drawText(rect.adjusted(0, 30, 0, 30), Qt.AlignmentFlag.AlignCenter, label)
+        p.drawText(
+            rect.adjusted(0, 30 + side / 14, 0, 30 + side / 14),
+            Qt.AlignmentFlag.AlignCenter,
+            PHASE_LABELS[self._phase],
+        )
 
 
 # ---------- Panel ------------------------------------------------------------
@@ -109,12 +107,14 @@ class _ActiveSession:
 
 class PomodoroPanel(QWidget):
     """
-    Right-side pomodoro panel. Connect `phase_completed(str, int)` to surface
-    a notification in the main window. Call `set_active_document(doc_id)` when
-    a PDF is loaded so sessions are tied to the right book.
+    Right-side pomodoro panel. `phase_completed(phase, minutes)` fires when a
+    phase ends (naturally or skipped) and `next_phase(phase)` once the timer
+    has advanced, so the window can notify the reader.
     """
 
-    phase_completed = pyqtSignal(str, int)  # phase ("focus"|"break"|"long"), minutes
+    phase_completed = pyqtSignal(str, int)  # phase, minutes
+    next_phase = pyqtSignal(str)
+    running_changed = pyqtSignal(bool)
 
     def paintEvent(self, event):
         opt = QStyleOption()
@@ -127,14 +127,18 @@ class PomodoroPanel(QWidget):
         self.store = store
         self._doc_id: str | None = None
         self._preset = 25
+        self._short_s = SHORT_BREAK_S
+        self._long_s = LONG_BREAK_S
+        self._cycles = CYCLES_PER_LONG
+        self._auto_break = False
         self._phase = "focus"
         self._cycle = 0
         self._total = self._preset * 60
         self._remaining = self._total
         self._running = False
         self._active: _ActiveSession | None = None
+        self._palette = DARK
 
-        self._dark = True
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
@@ -143,7 +147,24 @@ class PomodoroPanel(QWidget):
         self._apply_panel_style()
         self._refresh()
 
-    # public API
+    # ---- public API ----
+
+    def configure(
+        self,
+        focus_min: int = 25,
+        short_min: int = 5,
+        long_min: int = 15,
+        cycles: int = CYCLES_PER_LONG,
+        auto_start_breaks: bool = False,
+    ) -> None:
+        self._short_s = max(1, short_min) * 60
+        self._long_s = max(1, long_min) * 60
+        self._cycles = max(1, cycles)
+        self._auto_break = auto_start_breaks
+        self._rebuild_pills()
+        if not self._running and self._active is None:
+            self.set_preset(max(1, focus_min))
+
     def set_active_document(self, doc_id: str | None) -> None:
         self._doc_id = doc_id
         if doc_id and self._active is not None:
@@ -153,86 +174,63 @@ class PomodoroPanel(QWidget):
     def active_session_id(self) -> int | None:
         return self._active.db_id if self._active else None
 
-    def set_dark_mode(self, dark: bool) -> None:
-        self.ring.set_dark(dark)
-        self._dark = dark
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    @property
+    def phase(self) -> str:
+        return self._phase
+
+    def set_palette(self, palette: Palette) -> None:
+        self._palette = palette
+        self.ring.set_palette(palette)
         self._apply_panel_style()
         self._refresh()
 
+    def set_dark_mode(self, dark: bool) -> None:  # legacy API
+        from .ui.theme import LIGHT
+
+        self.set_palette(DARK if dark else LIGHT)
+
     def _apply_panel_style(self):
-        dark = self._dark
-        bg = "#000000" if dark else "#ffffff"
-        ink = "#f0f0f0" if dark else "#0a0a0a"
-        border = "#1e1e1e" if dark else "#e4e4e0"
-        hover = "#181818" if dark else "#eaeae6"
-        accent = "#d8a85a"
-        # Use the panel's own stylesheet so it wins over the app-level sheet.
-        # Every selector is scoped to children of this widget via descendant rules.
-        self.setStyleSheet(f"""
-            PomodoroPanel {{
-                background:{bg};
-            }}
-            PomodoroPanel QLabel {{
-                background:transparent;
-                color:{ink};
-            }}
+        P = self._palette
+        self.setStyleSheet(
+            f"""
+            PomodoroPanel {{ background:{P.bg}; }}
+            PomodoroPanel QLabel {{ background:transparent; color:{P.text}; }}
             PomodoroPanel QPushButton {{
-                background:transparent;
-                color:{ink};
-                border:1px solid {border};
-                border-radius:5px;
-                padding:6px 14px;
-                font-size:14px;
+                background:transparent; color:{P.text}; border:1px solid {P.border};
+                border-radius:5px; padding:6px 12px; font-size:14px;
             }}
-            PomodoroPanel QPushButton:hover {{
-                background:{hover};
-            }}
-            PomodoroPanel QPushButton:disabled {{
-                color:{"#333333" if dark else "#cccccc"};
-                border-color:{"#222" if dark else "#ddd"};
-            }}
+            PomodoroPanel QPushButton:hover {{ background:{P.bg_hover}; }}
+            PomodoroPanel QPushButton:disabled {{ color:{P.text_muted}; border-color:{P.border}; }}
             PomodoroPanel QPushButton#playButton {{
-                background:{accent};
-                color:#000000;
-                border:none;
-                font-weight:600;
+                background:{P.accent}; color:{P.accent_text}; border:none; font-weight:600;
             }}
-            PomodoroPanel QPushButton#playButton:hover {{
-                background:#e8bb6a;
-            }}
+            PomodoroPanel QPushButton#playButton:hover {{ background:{P.accent_hover}; }}
             PomodoroPanel QPushButton:checked {{
-                background:{accent};
-                color:#000000;
-                border-color:{accent};
+                background:{P.accent}; color:{P.accent_text}; border-color:{P.accent};
             }}
-        """)
+            """
+        )
 
     # ---- layout ----
+
     def _build(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 24, 20, 16)
         outer.setSpacing(14)
 
-        # phase pills
         self.pill_row = QHBoxLayout()
         self.pill_row.setSpacing(6)
-        self._pills = []
-        for i in range(CYCLES_PER_LONG):
-            lab = QLabel(f"{i + 1:02d}")
-            lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lab.setFixedSize(36, 22)
-            lab.setProperty("class", "pomPill")
-            self.pill_row.addWidget(lab)
-            self._pills.append(lab)
-        self.pill_row.addStretch(1)
-        self.pill_row.insertStretch(0, 1)
+        self._pills: list[QLabel] = []
         outer.addLayout(self.pill_row)
+        self._rebuild_pills()
 
-        # ring
         self.ring = _Ring(self)
         outer.addWidget(self.ring, 1)
 
-        # action row
         actions = QHBoxLayout()
         actions.addStretch(1)
         self.btn_reset = QPushButton("Reset")
@@ -247,13 +245,13 @@ class PomodoroPanel(QWidget):
         actions.addStretch(1)
         outer.addLayout(actions)
 
-        # presets
         presets = QHBoxLayout()
         presets.addStretch(1)
-        self._preset_btns = []
+        self._preset_btns: list[tuple[int, QPushButton]] = []
         for m in PRESETS_MIN:
-            b = QPushButton(f"{m} min")
+            b = QPushButton(f"{m}m")
             b.setCheckable(True)
+            b.setToolTip(f"{m}-minute focus")
             b.clicked.connect(lambda _=False, mm=m: self.set_preset(mm))
             presets.addWidget(b)
             self._preset_btns.append((m, b))
@@ -261,9 +259,25 @@ class PomodoroPanel(QWidget):
         outer.addLayout(presets)
         outer.addStretch(1)
 
+    def _rebuild_pills(self) -> None:
+        while self.pill_row.count():
+            item = self.pill_row.takeAt(0)
+            if item is not None and (w := item.widget()) is not None:
+                w.deleteLater()
+        self._pills = []
+        self.pill_row.addStretch(1)
+        for i in range(self._cycles):
+            lab = QLabel(f"{i + 1:02d}")
+            lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lab.setFixedSize(36, 22)
+            self.pill_row.addWidget(lab)
+            self._pills.append(lab)
+        self.pill_row.addStretch(1)
+
     # ---- controls ----
+
     def set_preset(self, minutes: int):
-        if self._running:
+        if self._running or self._active is not None:
             return
         self._preset = minutes
         self._phase = "focus"
@@ -283,33 +297,37 @@ class PomodoroPanel(QWidget):
             elapsed = int(time.time() - self._active.started_at)
             self.store.end_session(self._active.db_id, completed=False, actual_s=elapsed)
             self._active = None
-        self._running = False
+        self._set_running(False)
         self._remaining = self._total
         self._refresh()
 
     def skip(self):
-        self._remaining = 0
-        self._tick()  # forces phase advance
+        self._timer.stop()
+        self._set_running(False)
+        self._finish_phase(completed=False)
+        self._refresh()
 
     # ---- internals ----
+
+    def _set_running(self, running: bool) -> None:
+        if running != self._running:
+            self._running = running
+            self.running_changed.emit(running)
+
     def _start(self):
         if self._active is None:
             self._active = _ActiveSession(
-                db_id=self.store.start_session(
-                    self._doc_id,
-                    self._phase,
-                    self._total,
-                ),
+                db_id=self.store.start_session(self._doc_id, self._phase, self._total),
                 started_at=time.time(),
                 planned_s=self._total,
                 phase=self._phase,
             )
-        self._running = True
+        self._set_running(True)
         self._timer.start()
         self._refresh()
 
     def _pause(self):
-        self._running = False
+        self._set_running(False)
         self._timer.stop()
         self._refresh()
 
@@ -318,50 +336,46 @@ class PomodoroPanel(QWidget):
             self._remaining -= 1
         if self._remaining <= 0:
             self._timer.stop()
-            self._running = False
+            self._set_running(False)
             self._finish_phase(completed=True)
+            if self._auto_break and self._phase != "focus":
+                self._start()
         self._refresh()
 
     def _finish_phase(self, completed: bool):
         if self._active is not None:
             elapsed = int(time.time() - self._active.started_at)
             self.store.end_session(self._active.db_id, completed=completed, actual_s=elapsed)
-            mins = max(1, round(elapsed / 60))
-            self.phase_completed.emit(self._phase, mins)
+            self.phase_completed.emit(self._phase, max(1, round(elapsed / 60)))
             self._active = None
-        # advance phase
         if self._phase == "focus":
             self._cycle += 1
-            if self._cycle % CYCLES_PER_LONG == 0:
-                self._phase, self._total = "long", LONG_BREAK_S
+            if self._cycle % self._cycles == 0:
+                self._phase, self._total = "long", self._long_s
             else:
-                self._phase, self._total = "break", SHORT_BREAK_S
+                self._phase, self._total = "break", self._short_s
         else:
             self._phase, self._total = "focus", self._preset * 60
         self._remaining = self._total
+        self.next_phase.emit(self._phase)
 
     def _refresh(self):
+        P = self._palette
         self.ring.set_state(self._remaining, self._total, self._phase)
         self.btn_play.setText(
-            "Pause" if self._running else ("Resume" if self._remaining < self._total else "Begin")
+            "Pause" if self._running else ("Resume" if self._active is not None else "Begin")
         )
         for m, b in self._preset_btns:
             b.setChecked(m == self._preset and self._phase == "focus")
-        # pill colours follow dark/light theme
-        _on_bg = "#ffffff" if self._dark else "#0a0a0a"
-        _on_fg = "#000000" if self._dark else "#ffffff"
-        _done_bg = "#2a2a2a" if self._dark else "#e8e8e8"
-        _done_fg = "#666666" if self._dark else "#999999"
-        _idle_col = "#444444" if self._dark else "#cccccc"
-        _base = "border-radius:11px;font-family:monospace;font-size:10px;letter-spacing:2px;"
+            b.setEnabled(not self._running and self._active is None)
+        base = f"border-radius:11px;font-family:{MONO_FONT};font-size:10px;letter-spacing:2px;"
+        pos = self._cycle % self._cycles
         for i, lab in enumerate(self._pills):
-            done = i < (self._cycle % CYCLES_PER_LONG)
-            on = i == (self._cycle % CYCLES_PER_LONG) and self._phase == "focus"
-            if on:
-                lab.setStyleSheet(f"background:{_on_bg};color:{_on_fg};{_base}")
-            elif done:
-                lab.setStyleSheet(f"background:{_done_bg};color:{_done_fg};{_base}")
+            if i == pos and self._phase == "focus":
+                lab.setStyleSheet(f"background:{P.text};color:{P.bg};{base}")
+            elif i < pos:
+                lab.setStyleSheet(f"background:{P.border_light};color:{P.text_muted};{base}")
             else:
                 lab.setStyleSheet(
-                    f"background:transparent;color:{_idle_col};border:1px solid {_idle_col};{_base}"
+                    f"background:transparent;color:{P.text_muted};border:1px solid {P.border_light};{base}"
                 )
