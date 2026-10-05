@@ -21,7 +21,7 @@ private reading analytics. Everything stays on your computer.
 - Neural voices via [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), with the sentence being
   spoken highlighted and followed on screen
 - Keeps reading onto the next page, skipping blank pages; read a selection or "read aloud from here"
-- Instant pause/stop, adjustable speed, 13 voices (US/UK)
+- Pause/stop, adjustable speed, 13 voices (US/UK)
 - Falls back to the system speech engine (speech-dispatcher) when neural voices aren't installed
 
 **Notes**
@@ -37,46 +37,201 @@ private reading analytics. Everything stays on your computer.
 |---|---|
 | ![Sepia theme](docs/screenshots/reader-sepia.png) | ![Analytics](docs/screenshots/analytics.png) |
 
-## Install
+## Run it
 
-### AppImage (any distro)
+### Requirements
 
-Download from the [Releases](https://github.com/shailendrasekhar/akshara/releases) page:
+- Linux with a graphical session (X11 or Wayland)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- Python 3.11 or newer (uv downloads one if needed)
+- For neural voices: `libportaudio2` (audio output), and 1–3 GB of free disk for PyTorch and the model.
+  An NVIDIA GPU makes synthesis faster, but the CPU works
+- Optional, for the system-voice fallback: `speech-dispatcher`
 
-- `Akshara-<version>-x86_64.AppImage` includes the neural voices (large download)
-- `Akshara-lite-<version>-x86_64.AppImage` uses system speech; neural voices can be added later
-  from **Preferences ▸ Read aloud ▸ Install neural voices…**
-
-```bash
-chmod +x Akshara-*.AppImage && ./Akshara-*.AppImage
-```
-
-### Flatpak
+On Debian/Ubuntu:
 
 ```bash
-flatpak install --user Akshara.flatpak        # bundle from the Releases page
-flatpak run io.github.shailendrasekhar.Akshara
+sudo apt install libportaudio2 speech-dispatcher
 ```
 
-The Flatpak ships with system speech. Install neural voices from Preferences.
-
-### From source with uv
+### From a checkout (quickest)
 
 ```bash
 git clone https://github.com/shailendrasekhar/akshara.git
 cd akshara
-uv tool install ".[tts]"                     # drop [tts] for the lightweight reader
-packaging/linux/install-desktop-entry.sh     # optional: app menu entry, icon, "Open with"
-akshara path/to/book.pdf
+
+uv run akshara                      # reader + system voices only (small download)
+uv run --extra tts akshara          # with neural voices (downloads PyTorch, ~1–3 GB)
+uv run --extra tts akshara path/to/book.pdf --no-splash
 ```
 
-Or run it in place without installing: `uv run --extra tts akshara`.
+On Linux, PyPI's PyTorch build includes CUDA libraries, which is why the `tts` extra is large.
 
-On first use, the neural voice model (~330 MB) downloads from Hugging Face; after that it works
-offline. An NVIDIA GPU makes synthesis faster, but the CPU is fine.
+### Install as a command
 
-**System packages:** `libportaudio2` for neural-voice audio output, and optionally
-`speech-dispatcher` for the system voice fallback.
+```bash
+uv tool install ".[tts]"                     # or just "." for the lightweight reader
+akshara --version
+packaging/linux/install-desktop-entry.sh     # optional: menu entry, icon, "Open with" for PDFs
+```
+
+To undo: `packaging/linux/install-desktop-entry.sh --uninstall` and `uv tool uninstall akshara`.
+
+### Neural voices for a lightweight install
+
+Any build without the `tts` extra can add neural voices later from
+**Edit ▸ Preferences ▸ Read aloud ▸ Install neural voices…**. This installs Kokoro and a CPU build
+of PyTorch (about 1 GB) into `~/.local/share/akshara/tts-addon/`. It uses `pip`, or `uv` if the
+Python has no pip. After it finishes, choose **Neural (Kokoro)** as the engine.
+
+### AppImage and Flatpak
+
+No release has been published yet. The packaging is in `packaging/`, and pushing a `v*` tag runs
+the release workflow, which attaches the wheel, two AppImages and a Flatpak bundle to a GitHub
+release. To build them yourself, see [Building packages](#building-packages).
+
+## Verify your setup
+
+Work through these after installing. Each step says what you should see.
+
+**1. The app starts**
+
+```bash
+uv run akshara --version            # prints: akshara 0.2.0
+uv run akshara --no-splash
+```
+
+The welcome screen appears. **Help ▸ About** lists each speech engine and says whether it is
+available, or why it isn't.
+
+**2. Neural voices (Kokoro)**
+
+First check speech outside the GUI. This downloads the model (~330 MB, from Hugging Face) on the
+first run and plays one sentence:
+
+```bash
+uv run --extra tts python -c "
+import numpy as np, sounddevice as sd
+from kokoro import KPipeline
+p = KPipeline(lang_code='a', repo_id='hexgrad/Kokoro-82M')
+audio = np.concatenate([r.audio.numpy() for r in p('Hello from Akshara.', voice='af_heart')])
+sd.play(audio, 24000); sd.wait()"
+```
+
+GPU check (optional): `uv run --extra tts python -c "import torch; print(torch.cuda.is_available())"`.
+
+Then in the app (`uv run --extra tts akshara`), open a PDF with real text (not a scan) and press
+**Space**:
+- The status bar shows "Loading voice…" briefly, then "Reading aloud".
+- Each sentence is highlighted as it is spoken, and the view follows it.
+- **Space** pauses and resumes; **Esc** stops at once.
+- With **Speech ▸ Continue onto Next Page** checked, reading carries on to the next page.
+- Right-click a word ▸ **Read aloud from here** starts at that word.
+
+Common problems:
+- `OSError: PortAudio library not found` from the snippet, or "Audio output error: PortAudio library
+  not found" in the app's status bar, means `libportaudio2` is missing.
+- "Neural (Kokoro) (unavailable)" in Preferences means the `tts` extra or the add-on isn't
+  installed.
+
+**3. System voices (fallback)**
+
+`spd-say "hello"` should speak. Then choose **System (speech-dispatcher)** under
+**Preferences ▸ Read aloud** and press Space on a page.
+
+**4. Desktop notifications**
+
+`notify-send test` should show a notification. In the app, press **Begin** on the Pomodoro panel,
+then **Skip**: a "Short Break" notification appears. Without a notification service, the app
+beeps instead.
+
+**5. Your data**
+
+Close the app and reopen it. Your theme, window layout, zoom mode and speech speed are restored,
+and the last book reopens at the page you left (controlled by **Preferences ▸ General**).
+
+**6. Test suite**
+
+```bash
+uv sync
+uv run pytest
+```
+
+The tests run headless and need no display or audio. On minimal systems, install Qt's runtime
+libraries first: `sudo apt install libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3`.
+
+## Building packages
+
+### AppImage
+
+Needs `uv` and network access to PyPI and GitHub; `python-appimage` downloads its base image
+from GitHub.
+
+```bash
+packaging/appimage/build.sh              # dist/Akshara-lite-0.2.0-x86_64.AppImage (system voices)
+packaging/appimage/build.sh --with-tts   # dist/Akshara-0.2.0-x86_64.AppImage (CPU PyTorch + Kokoro)
+```
+
+Check the result:
+
+```bash
+./dist/Akshara-lite-0.2.0-x86_64.AppImage --version
+./dist/Akshara-lite-0.2.0-x86_64.AppImage path/to/book.pdf
+```
+
+If it fails with a FUSE error, install `libfuse2` or run it with `APPIMAGE_EXTRACT_AND_RUN=1`.
+Then work through [Verify your setup](#verify-your-setup) with the AppImage in place of `uv run akshara`.
+
+### Flatpak
+
+```bash
+sudo apt install flatpak flatpak-builder
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.kde.Sdk//6.9 org.kde.Platform//6.9 com.riverbankcomputing.PyQt.BaseApp//6.9
+
+flatpak-builder --user --install --force-clean build-dir \
+    packaging/flatpak/io.github.shailendrasekhar.Akshara.yml
+flatpak run io.github.shailendrasekhar.Akshara
+```
+
+To make a single-file bundle instead of installing:
+
+```bash
+flatpak-builder --repo=repo --force-clean build-dir packaging/flatpak/io.github.shailendrasekhar.Akshara.yml
+flatpak build-bundle repo Akshara.flatpak io.github.shailendrasekhar.Akshara
+```
+
+Notes:
+- **PortAudio checksum.** The PortAudio `sha256` in the manifest has not been verified against
+  the download yet. If flatpak-builder reports a checksum mismatch, compute the real value and
+  put it in the manifest:
+  `curl -sL http://files.portaudio.com/archives/pa_stable_v190700_20210406.tgz | sha256sum`.
+- **Runtime version.** The manifest targets KDE runtime / PyQt BaseApp **6.9**. If you change it,
+  check the Python version (the wheels are for CPython 3.12 / abi3) and regenerate the deps.
+- **Python dependencies.** These are pinned in `packaging/flatpak/python3-deps.json`. Regenerate
+  them after `uv lock --upgrade` with `uv run python packaging/flatpak/generate_python_deps.py`.
+- **Voices.** The Flatpak ships system voices only; add neural voices from Preferences. The
+  manifest grants network access for that and for the model download.
+
+### Validate the desktop metadata
+
+```bash
+desktop-file-validate packaging/linux/*.desktop
+appstreamcli validate --no-net packaging/linux/*.metainfo.xml
+```
+
+### Releasing
+
+Bump `version` in `pyproject.toml` and the `<release>` entry in
+`packaging/linux/io.github.shailendrasekhar.Akshara.metainfo.xml`, then:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` builds the wheel, both AppImages and the Flatpak bundle and
+publishes them as a GitHub release. It can also be started manually from the Actions tab
+(`workflow_dispatch`); that builds the artifacts without publishing a release.
 
 ## Keyboard shortcuts
 
@@ -88,7 +243,7 @@ offline. An NVIDIA GPU makes synthesis faster, but the CPU is fine.
 | `Ctrl+R` / `Ctrl+Shift+R` | Read current page / read selection |
 | `Esc` | Close find bar, stop reading, or leave focus mode |
 | `Ctrl+[` `Ctrl+]` | Slower / faster speech |
-| `Ctrl+F`, `F3` | Find, find next |
+| `Ctrl+F`, `F3` / `Shift+F3` | Find, next / previous match |
 | `Ctrl+B`, `Ctrl+Alt+↑/↓` | Toggle bookmark, jump between bookmarks |
 | `Ctrl+C`, `Ctrl+A` | Copy selection, select all on page |
 | `Ctrl++` `Ctrl+-` `Ctrl+0`, `Ctrl+1` `Ctrl+2` | Zoom, actual size, fit width, fit page |
@@ -108,7 +263,13 @@ Right-click the page for copy, highlight, read-from-here and bookmark actions.
 | Neural-voice add-on | `~/.local/share/akshara/tts-addon/` |
 | Voice model cache | `~/.cache/huggingface/` |
 
-The database upgrades itself in place when a new version changes the schema.
+Inside the Flatpak these live under `~/.var/app/io.github.shailendrasekhar.Akshara/`. A database
+from an older version upgrades itself in place on first launch. To try the app without touching
+your real data, point it at temporary files:
+
+```bash
+AKSHARA_DB=/tmp/a.db AKSHARA_CONFIG=/tmp/a.ini uv run akshara
+```
 
 ## Development
 
@@ -117,8 +278,11 @@ uv sync                                   # app + dev tools (add --extra tts for
 uv run akshara --no-splash
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
-uv run pytest                             # headless; QT_QPA_PLATFORM=offscreen is set automatically
+uv run pytest --cov
 ```
+
+CI (`.github/workflows/ci.yml`) runs lint, format, type checks and tests on Python 3.11–3.13, and
+validates the desktop entry and metainfo.
 
 Project layout:
 
@@ -145,9 +309,6 @@ packaging/
 ├── linux/              desktop entry, AppStream metainfo, icons, user install script
 └── make_icons.py       regenerates the icon set from the logo
 ```
-
-Releases: push a `v*` tag. The release workflow builds the wheel, both AppImages and the
-Flatpak bundle, and attaches them to a GitHub release.
 
 ## License
 

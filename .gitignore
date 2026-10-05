@@ -49,3 +49,4 @@ htmlcov/
 build-dir/
 *.AppImage
 *.flatpak
+repo/
