@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Akshara
+GenericName=PDF Reader
+Comment=Focused PDF reader with neural text-to-speech, Pomodoro timer and reading analytics
+Exec=akshara %f
+Icon=io.github.shailendrasekhar.Akshara
+Terminal=false
+Categories=Office;Viewer;Qt;
+MimeType=application/pdf;
+Keywords=pdf;reader;ebook;tts;text-to-speech;read aloud;pomodoro;focus;
+StartupNotify=true
+StartupWMClass=akshara

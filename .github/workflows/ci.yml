@@ -48,3 +48,16 @@ jobs:
 
       - name: Test
         run: uv run pytest --cov --cov-report=term-missing
+
+  packaging:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils appstream
+      - name: Validate desktop entry
+        run: desktop-file-validate packaging/linux/*.desktop
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --no-net packaging/linux/*.metainfo.xml
+      - name: Check shell scripts
+        run: bash -n packaging/appimage/build.sh packaging/linux/install-desktop-entry.sh akshara-launcher.sh

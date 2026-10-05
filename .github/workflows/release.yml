@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+
+  appimage:
+    # Oldest supported runner = widest glibc compatibility for the bundle.
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        variant: [lite, tts]
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Free disk space for the PyTorch build
+        if: matrix.variant == 'tts'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+      - name: Build AppImage
+        run: |
+          if [ "${{ matrix.variant }}" = "tts" ]; then
+            packaging/appimage/build.sh --with-tts
+          else
+            packaging/appimage/build.sh
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage-${{ matrix.variant }}
+          path: dist/*.AppImage
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Akshara.flatpak
+          manifest-path: packaging/flatpak/io.github.shailendrasekhar.Akshara.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wheel, appimage, flatpak]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/python-dist/*
+            artifacts/appimage-*/*.AppImage
+            artifacts/*/Akshara.flatpak

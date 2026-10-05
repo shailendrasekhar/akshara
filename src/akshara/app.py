@@ -45,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     font.setStyleHint(QFont.StyleHint.Serif)
     app.setFont(font)
 
+    # Make a user-installed neural-voice add-on importable before engines are probed.
+    from .tts import addon
+
+    addon.activate()
+
     # Imported late so --help/--version work without building any widgets.
     from .main_window import MainWindow
     from .splash_screen import SplashController

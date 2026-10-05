@@ -94,6 +94,7 @@ class MainWindow(QMainWindow):
         self._pre_focus_state: tuple[bool, bool, bool, bool] | None = None
         self._actions: dict[str, QAction] = {}
         self._bookmarked: set[int] = set()
+        self._pending_resume: int | None = None
 
         # Speech
         self.tts_engine: SpeechEngine | None = None
@@ -113,6 +114,11 @@ class MainWindow(QMainWindow):
         self._save_pos_timer.setSingleShot(True)
         self._save_pos_timer.setInterval(800)
         self._save_pos_timer.timeout.connect(self._save_position)
+        # Owned by the window so it can never fire after the window is gone.
+        self._tts_status_timer = QTimer(self)
+        self._tts_status_timer.setSingleShot(True)
+        self._tts_status_timer.setInterval(2500)
+        self._tts_status_timer.timeout.connect(self._clear_tts_status)
 
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(820, 560)
@@ -280,8 +286,8 @@ class MainWindow(QMainWindow):
         A("copy", "&Copy", self._copy, SK.Copy)
         A("select_all", "Select &All on Page", self.pdf_viewer.select_all_on_page, SK.SelectAll)
         A("find", "&Find…", self._open_find, SK.Find)
-        A("find_next", "Find &Next", self._find_next, SK.FindNext)
-        A("find_prev", "Find &Previous", self._find_prev, SK.FindPrevious)
+        A("find_next", "Find &Next", self._find_next, "F3")
+        A("find_prev", "Find &Previous", self._find_prev, "Shift+F3")
         A("prefs", "&Preferences…", self._show_preferences, "Ctrl+,")
         # View
         A("zoom_in", "Zoom &In", self.pdf_viewer.zoom_in, [SK.ZoomIn, "Ctrl+="])
@@ -298,7 +304,7 @@ class MainWindow(QMainWindow):
         A("text_size", "Cycle Interface &Text Size", self._cycle_text_size, "Ctrl+Shift+T")
         A("sidebar", "&Sidebar", self._toggle_sidebar, "F9", checkable=True)
         A("show_pomodoro", "&Pomodoro Panel", self._toggle_pomodoro_dock, "F10", checkable=True)
-        A("fullscreen", "&Full Screen", self._toggle_fullscreen, SK.FullScreen, checkable=True)
+        A("fullscreen", "&Full Screen", self._toggle_fullscreen, "F11", checkable=True)
         A("focus_mode", "F&ocus Mode", self._toggle_focus_mode, "Ctrl+Shift+F", checkable=True)
         # Go
         A("prev_page", "&Previous Page", self._prev_page, [Qt.Key.Key_Left, "Ctrl+Up"])
@@ -691,9 +697,15 @@ class MainWindow(QMainWindow):
         # Resume where the reader left off (last_page is stored 1-based).
         if row and 1 < row.last_page <= count:
             # Defer until the viewport has its final size so fit-zoom is right.
-            QTimer.singleShot(0, lambda p=row.last_page - 1: self.pdf_viewer.go_to_page(p))
+            self._pending_resume = row.last_page - 1
+            QTimer.singleShot(0, self._apply_resume)
             self.status_label.setText(f"Resumed at page {row.last_page}")
         return True
+
+    def _apply_resume(self) -> None:
+        if self._pending_resume is not None and not self._closed:
+            self.pdf_viewer.go_to_page(self._pending_resume)
+        self._pending_resume = None
 
     def _leave_document(self) -> None:
         """Flush state for the current document before switching or closing."""
@@ -1175,14 +1187,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_speech_finished(self) -> None:
         self.tts_status_label.setText("Finished reading")
-        QTimer.singleShot(
-            2500,
-            lambda: (
-                self.tts_status_label.setText("")
-                if self.reader and not self.reader.is_active
-                else None
-            ),
-        )
+        self._tts_status_timer.start()
+
+    def _clear_tts_status(self) -> None:
+        if self.reader is None or not self.reader.is_active:
+            self.tts_status_label.setText("")
 
     @pyqtSlot(int)
     def _on_words_spoken(self, n: int) -> None:

@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .settings import Settings
-from .tts import ENGINES, Voice
+from .tts import ENGINES, KokoroEngine, Voice
 from .ui.theme import TEXT_SIZES, THEME_MODES
 
 
@@ -102,15 +102,17 @@ class SettingsDialog(QDialog):
     def _speech(self) -> QWidget:
         w, f = self._form()
         self.engine = QComboBox()
-        for key, cls in ENGINES.items():
-            ok = cls.is_available()
-            self.engine.addItem(cls.label + ("" if ok else "  (unavailable)"), key)
-            if not ok:
-                idx = self.engine.count() - 1
-                self.engine.setItemData(idx, cls.unavailable_reason(), Qt.ItemDataRole.ToolTipRole)
-        self.engine.setCurrentIndex(max(0, self.engine.findData(self.s.tts_engine)))
+        self._fill_engines()
         self.engine.currentIndexChanged.connect(self._fill_voices)
         f.addRow("Engine", self.engine)
+
+        self.addon_btn = QPushButton("Install neural voices…")
+        self.addon_btn.setToolTip(
+            "Download the Kokoro engine (about 1 GB) into your user data folder"
+        )
+        self.addon_btn.clicked.connect(self._install_addon)
+        self.addon_btn.setVisible(not KokoroEngine.is_available())
+        f.addRow("", self.addon_btn)
 
         self.voice = QComboBox()
         f.addRow("Voice", self.voice)
@@ -143,6 +145,33 @@ class SettingsDialog(QDialog):
         self.preload.setChecked(self.s.tts_preload)
         f.addRow("", self.preload)
         return w
+
+    def _fill_engines(self) -> None:
+        current = self.engine.currentData() or self.s.tts_engine
+        self.engine.blockSignals(True)
+        self.engine.clear()
+        for key, cls in ENGINES.items():
+            ok = cls.is_available()
+            self.engine.addItem(cls.label + ("" if ok else "  (unavailable)"), key)
+            if not ok:
+                idx = self.engine.count() - 1
+                self.engine.setItemData(idx, cls.unavailable_reason(), Qt.ItemDataRole.ToolTipRole)
+        self.engine.setCurrentIndex(max(0, self.engine.findData(current)))
+        self.engine.blockSignals(False)
+
+    def _install_addon(self) -> None:
+        from .addon_dialog import AddonInstallDialog
+
+        dlg = AddonInstallDialog(self)
+        dlg.installed.connect(self._on_addon_installed)
+        dlg.exec()
+
+    def _on_addon_installed(self) -> None:
+        self.addon_btn.setVisible(not KokoroEngine.is_available())
+        self.engine.setCurrentIndex(-1)
+        self._fill_engines()
+        self.engine.setCurrentIndex(max(0, self.engine.findData("kokoro")))
+        self._fill_voices()
 
     def _fill_voices(self) -> None:
         key = self.engine.currentData()

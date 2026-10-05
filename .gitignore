@@ -43,3 +43,9 @@ Thumbs.db
 .coverage
 coverage.xml
 htmlcov/
+
+# Packaging outputs
+.flatpak-builder/
+build-dir/
+*.AppImage
+*.flatpak

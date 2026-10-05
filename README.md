@@ -1,109 +1,153 @@
 # AKSHARA
 
-A Linux PDF reader built for focused reading — neural text-to-speech, Pomodoro timer, reading analytics, and a distraction-free interface.
+A calm Linux PDF reader built for deep reading: natural neural text-to-speech
+with sentence highlighting, highlights and notes, a Pomodoro timer, and
+private reading analytics. Everything stays on your computer.
+
+![Akshara in dark mode](docs/screenshots/reader-dark.png)
 
 ## Features
 
-- **PDF Viewing** — Continuous scroll rendering with lazy page loading, zoom controls, and fit-to-width on open
-- **Neural TTS** — Natural-sounding speech via [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M); sentence-level highlighting follows along
-- **Pomodoro Timer** — Right-side dock with focus/break cycles, session tracking, and preset durations (15 / 25 / 45 / 50 min)
-- **Reading Analytics** — Session history, page dwell times, and per-book progress tracked in a local SQLite database
-- **Library** — Left-side dock showing all previously opened documents with progress bars and quick re-open
-- **Text Selection & Copy** — Click-drag to select text on the PDF; right-click to copy
-- **Auto Theme** — Dark/light mode based on time of day (6 am–6 pm = light); togglable at any time
-- **Text Size Toggle** — Cycles S / M / L across the entire UI (toolbar, menus, status bar, panels) with one button
-- **Splash Animation** — Logo fades in centred, then travels to the top-left corner as the main window fades in maximized
+**Reading**
+- Smooth continuous scrolling with HiDPI-sharp rendering and a page cache
+- Fit width, fit page, or a remembered per-book zoom; Ctrl+scroll zooms at the cursor
+- Dark, light and sepia themes, following the desktop setting, the time of day, or your choice.
+  Pages are recoloured to match while photos and figures keep their colours
+- Table of contents, clickable links, whole-document search (Ctrl+F)
+- Reopens every book at the page you left; password-protected PDFs supported
+- Focus mode (Ctrl+Shift+F) hides everything but the page
 
-## Installation
+**Read aloud**
+- Neural voices via [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), with the sentence being
+  spoken highlighted and followed on screen
+- Keeps reading onto the next page, skipping blank pages; read a selection or "read aloud from here"
+- Instant pause/stop, adjustable speed, 13 voices (US/UK)
+- Falls back to the system speech engine (speech-dispatcher) when neural voices aren't installed
 
-### Prerequisites
+**Notes**
+- Word-level text selection; highlights with optional notes; bookmarks with notes
+- Export a book's highlights and bookmarks as Markdown
 
-- Linux (tested on Ubuntu 22.04+)
-- [uv](https://docs.astral.sh/uv/)
-- NVIDIA GPU recommended for fast TTS (CPU fallback works)
+**Focus and analytics**
+- Pomodoro timer with configurable lengths, optional auto-start breaks and desktop notifications
+- Analytics: 28-day heatmap, last-7-days chart, streaks, session lengths, time per book,
+  pages read and words heard, CSV export
 
-### Run from source
+| Sepia | Analytics |
+|---|---|
+| ![Sepia theme](docs/screenshots/reader-sepia.png) | ![Analytics](docs/screenshots/analytics.png) |
+
+## Install
+
+### AppImage (any distro)
+
+Download from the [Releases](https://github.com/shailendrasekhar/akshara/releases) page:
+
+- `Akshara-<version>-x86_64.AppImage` includes the neural voices (large download)
+- `Akshara-lite-<version>-x86_64.AppImage` uses system speech; neural voices can be added later
+  from **Preferences ▸ Read aloud ▸ Install neural voices…**
+
+```bash
+chmod +x Akshara-*.AppImage && ./Akshara-*.AppImage
+```
+
+### Flatpak
+
+```bash
+flatpak install --user Akshara.flatpak        # bundle from the Releases page
+flatpak run io.github.shailendrasekhar.Akshara
+```
+
+The Flatpak ships with system speech. Install neural voices from Preferences.
+
+### From source with uv
 
 ```bash
 git clone https://github.com/shailendrasekhar/akshara.git
 cd akshara
-
-uv sync --extra tts        # drop --extra tts for a lightweight reader without speech
-uv run akshara             # or: uv run akshara path/to/book.pdf
-```
-
-### Install as a user command
-
-```bash
-uv tool install ".[tts]"
+uv tool install ".[tts]"                     # drop [tts] for the lightweight reader
+packaging/linux/install-desktop-entry.sh     # optional: app menu entry, icon, "Open with"
 akshara path/to/book.pdf
 ```
+
+Or run it in place without installing: `uv run --extra tts akshara`.
+
+On first use, the neural voice model (~330 MB) downloads from Hugging Face; after that it works
+offline. An NVIDIA GPU makes synthesis faster, but the CPU is fine.
+
+**System packages:** `libportaudio2` for neural-voice audio output, and optionally
+`speech-dispatcher` for the system voice fallback.
+
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `Ctrl+O` / `Ctrl+W` | Open / close document |
+| `←` `→`, `Ctrl+Home` `Ctrl+End`, `Ctrl+G` | Previous/next page, first/last, go to page |
+| `Space` | Read aloud / pause / resume |
+| `Ctrl+R` / `Ctrl+Shift+R` | Read current page / read selection |
+| `Esc` | Close find bar, stop reading, or leave focus mode |
+| `Ctrl+[` `Ctrl+]` | Slower / faster speech |
+| `Ctrl+F`, `F3` | Find, find next |
+| `Ctrl+B`, `Ctrl+Alt+↑/↓` | Toggle bookmark, jump between bookmarks |
+| `Ctrl+C`, `Ctrl+A` | Copy selection, select all on page |
+| `Ctrl++` `Ctrl+-` `Ctrl+0`, `Ctrl+1` `Ctrl+2` | Zoom, actual size, fit width, fit page |
+| `Ctrl+T`, `Ctrl+Shift+T` | Cycle theme, cycle interface text size |
+| `F9`, `F10`, `F11`, `Ctrl+Shift+F` | Sidebar, Pomodoro panel, full screen, focus mode |
+| `Ctrl+P`, `Ctrl+Shift+A`, `Ctrl+,` | Start/pause Pomodoro, analytics, preferences |
+| `F1` | All shortcuts |
+
+Right-click the page for copy, highlight, read-from-here and bookmark actions.
+
+## Where data lives
+
+| What | Path |
+|---|---|
+| Library, sessions, bookmarks, highlights (SQLite) | `~/.local/share/akshara/akshara.db` (override: `AKSHARA_DB`) |
+| Preferences | `~/.config/akshara/settings.ini` (override: `AKSHARA_CONFIG`) |
+| Neural-voice add-on | `~/.local/share/akshara/tts-addon/` |
+| Voice model cache | `~/.cache/huggingface/` |
+
+The database upgrades itself in place when a new version changes the schema.
 
 ## Development
 
 ```bash
-uv sync                    # dev tools are installed by default
+uv sync                                   # app + dev tools (add --extra tts for neural voices)
+uv run akshara --no-splash
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
-uv run pytest
+uv run pytest                             # headless; QT_QPA_PLATFORM=offscreen is set automatically
 ```
 
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+O` | Open PDF |
-| `← / →` | Previous / next page |
-| `Space` | Play / pause TTS |
-| `Escape` | Stop TTS |
-| `Ctrl+R` | Read current page |
-| `Ctrl+Shift+R` | Read selected text |
-| `Ctrl+T` | Toggle dark / light mode |
-| `Ctrl+Shift+T` | Cycle text size (S → M → L) |
-| `Ctrl+Shift+A` | Open analytics |
-| `L` | Show / hide library |
-
-## Project Structure
+Project layout:
 
 ```text
-akshara/
-├── main.py                  # Entry point
-├── src/
-│   ├── main_window.py       # Application window, toolbar, menus
-│   ├── pdf_handler.py       # PDF document model (PyMuPDF)
-│   ├── pdf_viewer.py        # Continuous-scroll viewer widget
-│   ├── tts_engine.py        # Kokoro TTS wrapper
-│   ├── splash_screen.py     # Animated splash with logo travel
-│   ├── pomodoro.py          # Pomodoro timer panel
-│   ├── analytics.py         # Analytics dialog
-│   ├── library.py           # Library panel
-│   ├── db.py                # SQLite store (sessions, page views, documents)
-│   └── ui/
-│       └── styles.py        # Stylesheet generator (dark/light, text size)
-├── resources/
-│   └── icons/               # logo.png
-├── environment.yml
-└── requirements.txt
+src/akshara/
+├── app.py              entry point (CLI, splash, session restore)
+├── main_window.py      window, actions, menus, toolbar; wires everything together
+├── pdf_viewer.py       continuous-scroll viewer: rendering queue, overlays, selection, links
+├── render.py           page rasterisation, theme recolouring, LRU image cache
+├── pdf_handler.py      document model: metadata, geometry, text, links, outline, passwords
+├── textmap.py          word-level page text ↔ rectangles, sentences, search
+├── tts/                speech engines (Kokoro, system), read-aloud controller, voice add-on
+├── db.py               SQLite store with versioned migrations
+├── settings.py         typed QSettings preferences
+├── findbar.py          find bar + incremental search
+├── sidebar.py          contents, bookmarks, notes panels
+├── library.py          library panel
+├── pomodoro.py         Pomodoro panel
+├── analytics.py        analytics dialog
+└── ui/theme.py         palettes and stylesheet
+packaging/
+├── appimage/build.sh   AppImage (lite or --with-tts)
+├── flatpak/            Flatpak manifest + generated Python deps
+├── linux/              desktop entry, AppStream metainfo, icons, user install script
+└── make_icons.py       regenerates the icon set from the logo
 ```
 
-## Dependencies
-
-| Package     | Purpose                           |
-| ----------- | --------------------------------- |
-| PyQt6       | GUI framework                     |
-| PyMuPDF     | PDF rendering and text extraction |
-| kokoro      | Kokoro-82M neural TTS             |
-| torch       | PyTorch (TTS backend)             |
-| numpy       | Audio array processing            |
-| simpleaudio | PCM audio playback                |
-
-## Uninstall
-
-```bash
-sudo rm /usr/local/bin/akshara
-sudo rm /usr/share/applications/akshara.desktop
-conda env remove -n akshara
-```
+Releases: push a `v*` tag. The release workflow builds the wheel, both AppImages and the
+Flatpak bundle, and attaches them to a GitHub release.
 
 ## License
 

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.shailendrasekhar.Akshara</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Akshara</name>
+  <summary>Focused PDF reader with neural text-to-speech</summary>
+  <developer id="io.github.shailendrasekhar">
+    <name>Shailendra Sekhar Bathula</name>
+  </developer>
+  <description>
+    <p>
+      Akshara is a calm, distraction-free PDF reader built for deep reading.
+      It reads books aloud with natural neural voices, highlights each sentence
+      as it is spoken, and helps you build a reading habit with a built-in
+      Pomodoro timer and private, local reading analytics.
+    </p>
+    <ul>
+      <li>Neural text-to-speech (Kokoro-82M) with sentence highlighting and continuous reading</li>
+      <li>Dark, light and sepia themes that recolour pages but keep images intact</li>
+      <li>Highlights, notes and bookmarks, exportable as Markdown</li>
+      <li>Table of contents, fast whole-document search and clickable links</li>
+      <li>Pomodoro timer with desktop notifications</li>
+      <li>Reading analytics: streaks, time per book, pages read and words heard</li>
+    </ul>
+    <p>Everything stays on your computer.</p>
+  </description>
+  <launchable type="desktop-id">io.github.shailendrasekhar.Akshara.desktop</launchable>
+  <url type="homepage">https://github.com/shailendrasekhar/akshara</url>
+  <url type="bugtracker">https://github.com/shailendrasekhar/akshara/issues</url>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <mediatype>application/pdf</mediatype>
+    <binary>akshara</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <categories>
+    <category>Office</category>
+    <category>Viewer</category>
+  </categories>
+  <releases>
+    <release version="0.2.0" date="2026-10-05">
+      <description>
+        <p>A full modernisation: new viewer with HiDPI rendering, themes, highlights and notes,
+        search, table of contents, rewritten speech engine and packaging.</p>
+      </description>
+    </release>
+  </releases>
+</component>
