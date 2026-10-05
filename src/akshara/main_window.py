@@ -30,8 +30,8 @@ from .library import LibraryPanel
 from .pdf_handler import PDFDocument
 from .pdf_viewer import PDFViewerWidget
 from .pomodoro import PomodoroPanel
-from .textmap import PageText
-from .tts_engine import TTSEngine
+from .tts import State, create_engine
+from .tts.reader import ReadAloud
 from .ui.styles import get_main_stylesheet
 
 
@@ -180,14 +180,22 @@ class MainWindow(QMainWindow):
 
         # Initialize components
         self.pdf_doc = PDFDocument(self)
-        self.tts_engine = TTSEngine(self)
-
-        self.tts_engine.enable_hf(True, voice="af_heart", lang_code="a")
+        self.tts_engine = create_engine("kokoro", self)
+        self.reader: ReadAloud | None = None
+        if self.tts_engine is not None:
+            self.reader = ReadAloud(
+                self.tts_engine,
+                page_text=self.pdf_doc.page_text,
+                page_count=lambda: self.pdf_doc.page_count,
+                parent=self,
+            )
+            self.tts_engine.preload()
 
         self.store = Store()
         self._active_doc_id: str | None = None
         self._page_dwell_started_at: float | None = None
         self._dwell_page = 0
+        self._closed = False
 
         self.pomodoro = PomodoroPanel(self.store)
         self.pomodoro.phase_completed.connect(self._on_phase_completed)
@@ -540,10 +548,12 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.pdf_doc.document_loaded.connect(self._on_document_loaded)
         self.pdf_doc.error_occurred.connect(self._on_error)
-        self.tts_engine.speech_started.connect(self._on_speech_started)
-        self.tts_engine.speech_finished.connect(self._on_speech_finished)
-        self.tts_engine.word_changed.connect(self._on_word_changed)
-        self.tts_engine.error_occurred.connect(self._on_error)
+        if self.reader is not None:
+            self.reader.state_changed.connect(self._on_tts_state)
+            self.reader.finished.connect(self._on_speech_finished)
+            self.reader.highlight.connect(self.pdf_viewer.highlight_range)
+            self.reader.words_spoken.connect(self._on_words_spoken)
+            self.reader.error_occurred.connect(self._on_error)
 
     def _toggle_theme(self):
         self._dark_mode = not self._dark_mode
@@ -677,50 +687,41 @@ class MainWindow(QMainWindow):
     def _play_page(self):
         if not self.pdf_doc.is_loaded:
             return
-        doc = self.pdf_doc.document
-        assert doc is not None
-        text = PageText.from_page(doc[self.pdf_viewer.current_page]).text
-        if text.strip():
-            self.pdf_viewer.reset_read_position()
-            self.tts_engine.speak(text)
-        else:
+        if self.reader is None:
+            self.status_label.setText("Text-to-speech is not available — see Help ▸ About")
+            return
+        if not self.reader.read_page(self.pdf_viewer.current_page):
             self.status_label.setText("No text found on this page")
 
     def _play_selection(self):
         selected = self.pdf_viewer.get_selected_text()
+        if self.reader is None:
+            return
         if selected.strip():
-            self.pdf_viewer.reset_read_position()
-            self.tts_engine.speak(selected)
+            self.reader.read_text(selected)
         else:
             self.status_label.setText("Select text on the PDF first")
 
     def _play_or_pause(self):
-        if self.tts_engine.is_speaking:
+        if self.reader is not None and self.reader.is_active:
             self._toggle_pause()
         elif self.pdf_doc.is_loaded:
             self._play_page()
 
     def _toggle_pause(self):
-        if self.tts_engine.is_speaking:
-            if self.tts_engine.is_paused:
-                self.tts_engine.resume()
-                self.pause_btn.setText("⏸ Pause")
-                self.tts_status_label.setText("🔊 Reading...")
-            else:
-                self.tts_engine.pause()
-                self.pause_btn.setText("▶ Resume")
-                self.tts_status_label.setText("⏸ Paused")
+        if self.reader is not None:
+            self.reader.toggle_pause()
 
     def _stop(self):
-        self.tts_engine.stop()
-        self._update_tts_buttons(False)
-        self.pdf_viewer.highlight_text("")
-        self.tts_status_label.setText("")
+        if self.reader is not None:
+            self.reader.stop()
+        self.pdf_viewer.highlight_range(-1, -1, -1)
 
     def _update_speed(self, value: int):
         speed = value / 100.0
-        self.speed_value_label.setText(f"{speed:.1f}x")
-        self.tts_engine.set_rate_multiplier(speed)
+        self.speed_value_label.setText(f"{speed:.1f}×")
+        if self.tts_engine is not None:
+            self.tts_engine.set_rate(speed)
 
     def _update_tts_buttons(self, playing: bool):
         self.pause_btn.setEnabled(playing)
@@ -749,21 +750,29 @@ class MainWindow(QMainWindow):
     def _on_text_selected(self, text: str):
         self.status_label.setText(f"Selected {len(text.split())} words — right-click to copy")
 
-    @pyqtSlot()
-    def _on_speech_started(self):
-        self._update_tts_buttons(True)
-        self.tts_status_label.setText("🔊 Reading...")
+    @pyqtSlot(int)
+    def _on_tts_state(self, state: int):
+        st = State(state)
+        self._update_tts_buttons(st != State.IDLE)
+        self.pause_btn.setText("▶ Resume" if st == State.PAUSED else "⏸ Pause")
+        self.tts_status_label.setText(
+            {
+                State.LOADING: "⏳ Loading voice…",
+                State.SPEAKING: "🔊 Reading…",
+                State.PAUSED: "⏸ Paused",
+            }.get(st, "")
+        )
 
     @pyqtSlot()
     def _on_speech_finished(self):
-        self._update_tts_buttons(False)
-        self.pdf_viewer.highlight_text("")
         self.tts_status_label.setText("✓ Done")
         QTimer.singleShot(2000, lambda: self.tts_status_label.setText(""))
 
-    @pyqtSlot(str)
-    def _on_word_changed(self, word_chunk: str):
-        self.pdf_viewer.highlight_text(word_chunk)
+    @pyqtSlot(int)
+    def _on_words_spoken(self, n: int):
+        session_id = self.pomodoro.active_session_id
+        if session_id:
+            self.store.add_words_heard(session_id, n)
 
     @pyqtSlot(str)
     def _on_error(self, message: str):
@@ -815,8 +824,15 @@ class MainWindow(QMainWindow):
                 self._load_pdf(file_path)
 
     def closeEvent(self, event):
-        self.tts_engine.cleanup()
-        self.pdf_doc.close()
-        self.pomodoro.reset()
-        self.store.close()
+        if not self._closed:
+            self._closed = True
+            if self.tts_engine is not None:
+                self.tts_engine.shutdown()
+            # Stop the viewer first so no deferred scroll/page signal can reach
+            # the store after it is closed.
+            self.pdf_viewer.current_page_changed.disconnect(self._on_visible_page_changed)
+            self.pdf_viewer.clear()
+            self.pdf_doc.close()
+            self.pomodoro.reset()
+            self.store.close()
         event.accept()

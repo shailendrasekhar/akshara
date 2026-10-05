@@ -27,7 +27,6 @@ tts = [
     "kokoro>=0.9.4",
     "numpy>=1.24",
     "sounddevice>=0.4.6",
-    "soundfile>=0.12",
 ]
 
 [project.scripts]
@@ -40,6 +39,7 @@ dev = [
     "pytest-cov>=5",
     "ruff>=0.6",
     "mypy>=1.11",
+    "numpy>=1.24",  # exercised by the TTS engine tests with a fake pipeline
 ]
 build = [
     "pyinstaller>=6.6",

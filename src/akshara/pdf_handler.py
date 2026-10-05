@@ -1,6 +1,8 @@
 import pymupdf as fitz
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from .textmap import PageText
+
 
 class PDFDocument(QObject):
     document_loaded = pyqtSignal(int)
@@ -13,6 +15,7 @@ class PDFDocument(QObject):
         self._zoom: float = 1.0
         self._file_path: str = ""
         self.dark_mode: bool = True
+        self._text_cache: dict[int, PageText] = {}
 
     @property
     def is_loaded(self) -> bool:
@@ -58,6 +61,21 @@ class PDFDocument(QObject):
     def file_path(self) -> str:
         return self._file_path
 
+    def page_text(self, page_num: int) -> PageText:
+        """Word-mapped text of a page (cached; shared by viewer, search and TTS)."""
+        if not self._doc or not (0 <= page_num < len(self._doc)):
+            return PageText()
+        cached = self._text_cache.get(page_num)
+        if cached is None:
+            try:
+                cached = PageText.from_page(self._doc[page_num])
+            except Exception:
+                cached = PageText()
+            if len(self._text_cache) >= 64:
+                self._text_cache.pop(next(iter(self._text_cache)))
+            self._text_cache[page_num] = cached
+        return cached
+
     def load(self, file_path: str) -> bool:
         try:
             self.close()
@@ -74,6 +92,7 @@ class PDFDocument(QObject):
         if self._doc:
             self._doc.close()
             self._doc = None
+            self._text_cache.clear()
             self._file_path = ""
             self._current_page = 0
 

@@ -404,7 +404,7 @@ class PDFViewerWidget(QWidget):
         self._zoom: float = 1.0
         self._page_count: int = 0
         self._current_page: int = 0
-        self._current_read_position: int = 0
+        self._tts_highlight: tuple[int, int, int] = (-1, -1, -1)
 
         self._scroll_timer = QTimer(self)
         self._scroll_timer.setSingleShot(True)
@@ -436,7 +436,7 @@ class PDFViewerWidget(QWidget):
         self._zoom = zoom
         self._dark_mode = dark_mode
         self._current_page = 0
-        self._current_read_position = 0
+        self._tts_highlight = (-1, -1, -1)
         self._page_count = len(doc)
         self._build_layout()
         self.scroll_area.verticalScrollBar().setValue(0)
@@ -479,41 +479,44 @@ class PDFViewerWidget(QWidget):
 
     # ---- TTS / selection ----
 
-    def highlight_text(self, text: str):
-        assigned = self._canvas.all_assigned_pages()
-        if not text:
-            for pi in assigned:
-                pw = self._canvas.widget_for_page(pi)
-                if pw:
-                    pw.show_selection()
-                    pw.clear_tts_highlight()
-            self._current_read_position = 0
-            return
-
-        pages_to_search = [p for p in assigned if p >= self._current_page] + [
-            p for p in assigned if p < self._current_page
-        ]
-        for pi in pages_to_search:
+    def highlight_range(self, page: int, start: int, end: int):
+        """Highlight [start, end) of `page`'s PageText (page < 0 clears) and follow it."""
+        self._tts_highlight = (page, start, end)
+        for pi in self._canvas.all_assigned_pages():
             pw = self._canvas.widget_for_page(pi)
-            if pw is None or not pw.is_assigned():
+            if pw is None:
                 continue
-            pw.hide_selection()
-            start_from = self._current_read_position if pi == self._current_page else 0
-            start, end = pw.find_text_position(text, start_from)
-            if start >= 0:
-                for other_pi in assigned:
-                    other_pw = self._canvas.widget_for_page(other_pi)
-                    if other_pw and other_pw is not pw:
-                        other_pw.clear_tts_highlight()
+            if pi == page:
+                pw.hide_selection()
                 pw.set_tts_highlight_by_position(start, end)
-                self._current_read_position = end
-                if pi != self._current_page:
-                    self.go_to_page(pi)
-                return
-        self._current_read_position = 0
+            else:
+                pw.clear_tts_highlight()
+                pw.show_selection()
+        if page >= 0:
+            self._ensure_visible(page, start, end)
 
-    def reset_read_position(self):
-        self._current_read_position = 0
+    def _ensure_visible(self, page: int, start: int, end: int):
+        if self._doc is None or not (0 <= page < self._page_count):
+            return
+        scale = self._zoom * 1.5
+        top = self._canvas.page_top(page)
+        rects = self._pdf_page_text(page).rects_for_range(start, end)
+        if rects:
+            y0 = top + int(min(r[1] for r in rects) * scale)
+            y1 = top + int(max(r[3] for r in rects) * scale)
+        else:
+            y0 = y1 = top
+        bar = self.scroll_area.verticalScrollBar()
+        view_h = self.scroll_area.viewport().height()
+        if y0 < bar.value() or y1 > bar.value() + view_h:
+            bar.setValue(max(0, y0 - view_h // 3))
+
+    def _pdf_page_text(self, page: int) -> PageText:
+        pw = self._canvas.widget_for_page(page)
+        if pw is not None and pw.page_text:
+            return pw.page_text
+        assert self._doc is not None
+        return PageText.from_page(self._doc[page])
 
     def get_selected_text(self) -> str:
         for pi in self._canvas.all_assigned_pages():
@@ -531,9 +534,12 @@ class PDFViewerWidget(QWidget):
                 pw.clear_selection()
 
     def clear(self):
+        self._scroll_timer.stop()
+        for pi in list(self._canvas.all_assigned_pages()):
+            self._canvas.release_page(pi)
         self._doc = None
         self._page_count = 0
-        self._current_read_position = 0
+        self._tts_highlight = (-1, -1, -1)
 
     # ---- internal ----
 
@@ -623,6 +629,11 @@ class PDFViewerWidget(QWidget):
             self._canvas.assign_slot(
                 page_index, pixmap, text_spans, scale, PageText.from_page(page)
             )
+            hp, hs, he = self._tts_highlight
+            pw = self._canvas.widget_for_page(page_index)
+            if hp == page_index and pw is not None:
+                pw.hide_selection()
+                pw.set_tts_highlight_by_position(hs, he)
         except Exception:
             pass
 
