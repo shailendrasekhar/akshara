@@ -19,43 +19,34 @@ A Linux PDF reader built for focused reading — neural text-to-speech, Pomodoro
 ### Prerequisites
 
 - Linux (tested on Ubuntu 22.04+)
-- Anaconda or Miniconda
+- [uv](https://docs.astral.sh/uv/)
 - NVIDIA GPU recommended for fast TTS (CPU fallback works)
 
-### Setup
+### Run from source
 
 ```bash
-git clone https://github.com/yourusername/akshara.git
+git clone https://github.com/shailendrasekhar/akshara.git
 cd akshara
 
-conda env create -f environment.yml
-conda activate akshara
-
-# Optional: install as a system app
-sudo cp akshara-launcher.sh /usr/local/bin/akshara
-sudo chmod +x /usr/local/bin/akshara
-sudo cp akshara.desktop /usr/share/applications/
+uv sync --extra tts        # drop --extra tts for a lightweight reader without speech
+uv run akshara             # or: uv run akshara path/to/book.pdf
 ```
 
-### Manual dependency install (without environment.yml)
+### Install as a user command
 
 ```bash
-conda create -n akshara python=3.11 -y
-conda activate akshara
-pip install -r requirements.txt
+uv tool install ".[tts]"
+akshara path/to/book.pdf
 ```
 
-## Usage
+## Development
 
 ```bash
-conda activate akshara
-python main.py
-
-# Or open a PDF directly
-python main.py path/to/book.pdf
+uv sync                    # dev tools are installed by default
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pytest
 ```
-
-If installed as a system app: launch from the applications menu or run `akshara`.
 
 ## Keyboard Shortcuts
 

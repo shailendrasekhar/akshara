@@ -8,22 +8,25 @@ Signals:
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QPainter, QFont, QPen
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QScrollArea, QSizePolicy,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .db import Store, DocumentRow
-
+from .db import DocumentRow, Store
 
 # ---------- Single document card ---------------------------------------------
 
+
 class _DocCard(QWidget):
-    clicked = pyqtSignal(str)   # file path
+    clicked = pyqtSignal(str)  # file path
 
     def __init__(self, doc: DocumentRow, dark: bool, parent=None):
         super().__init__(parent)
@@ -74,11 +77,11 @@ class _DocCard(QWidget):
 
     def _apply_theme(self, dark: bool):
         self._dark = dark
-        bg       = "#0d0d0d" if dark else "#f7f7f6"
+        bg = "#0d0d0d" if dark else "#f7f7f6"
         bg_hover = "#1a1a1a" if dark else "#eeeeec"
-        border   = "#222222" if dark else "#e0e0dc"
-        ink      = "#ffffff" if dark else "#0a0a0a"
-        muted    = "#666666" if dark else "#999999"
+        border = "#222222" if dark else "#e0e0dc"
+        ink = "#ffffff" if dark else "#0a0a0a"
+        muted = "#666666" if dark else "#999999"
 
         self.setStyleSheet(f"""
             QWidget#docCard {{
@@ -88,7 +91,7 @@ class _DocCard(QWidget):
             }}
             QWidget#docCard:hover {{
                 background:{bg_hover};
-                border-color:{'#444' if dark else '#bbb'};
+                border-color:{"#444" if dark else "#bbb"};
             }}
         """)
         self._title.setStyleSheet(
@@ -96,8 +99,7 @@ class _DocCard(QWidget):
             f"color:{ink};background:transparent;border:none;"
         )
         self._author.setStyleSheet(
-            f"font-size:12px;letter-spacing:0.5px;color:{muted};"
-            f"background:transparent;border:none;"
+            f"font-size:12px;letter-spacing:0.5px;color:{muted};background:transparent;border:none;"
         )
         self._pct_label.setStyleSheet(
             f"font-family:monospace;font-size:12px;color:{muted};"
@@ -121,9 +123,8 @@ class _DocCard(QWidget):
         self._pages_label.setText(f"p. {last_page} / {self._progress_bar._total}")
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            if os.path.isfile(self._path):
-                self.clicked.emit(self._path)
+        if event.button() == Qt.MouseButton.LeftButton and os.path.isfile(self._path):
+            self.clicked.emit(self._path)
         super().mousePressEvent(event)
 
 
@@ -143,7 +144,7 @@ class _ProgressBar(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         track = QColor("#2a2a2a") if self._dark else QColor("#e0e0dc")
-        fill  = QColor("#d8a85a")   # warm amber accent — same as ring
+        fill = QColor("#d8a85a")  # warm amber accent — same as ring
         p.fillRect(self.rect(), track)
         w = int(self.width() * min(1.0, self._current / self._total))
         if w > 0:
@@ -153,6 +154,7 @@ class _ProgressBar(QWidget):
 
 
 # ---------- Panel ------------------------------------------------------------
+
 
 class LibraryPanel(QWidget):
     open_document = pyqtSignal(str)
@@ -190,8 +192,8 @@ class LibraryPanel(QWidget):
 
     def _apply_theme(self):
         dark = self._dark
-        bg   = "#000000" if dark else "#ffffff"
-        ink  = "#ffffff" if dark else "#0a0a0a"
+        bg = "#000000" if dark else "#ffffff"
+        ink = "#ffffff" if dark else "#0a0a0a"
 
         self.setStyleSheet(f"""
             QWidget {{ background:{bg}; color:{ink}; }}
@@ -200,7 +202,7 @@ class LibraryPanel(QWidget):
                 background:transparent;width:6px;margin:0;
             }}
             QScrollBar::handle:vertical {{
-                background:{'#2a2a2a' if dark else '#d0d0cc'};
+                background:{"#2a2a2a" if dark else "#d0d0cc"};
                 border-radius:3px;min-height:30px;
             }}
             QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical,
@@ -230,7 +232,7 @@ class LibraryPanel(QWidget):
         self._cards.clear()
 
         docs = self.store.list_documents()
-        stretch_item = self._cards_layout.takeAt(self._cards_layout.count() - 1)
+        self._cards_layout.takeAt(self._cards_layout.count() - 1)
 
         for doc in docs:
             card = _DocCard(doc, self._dark)

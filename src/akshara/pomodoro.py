@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import dataclass
-from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
-from PyQt6.QtGui import QPainter, QPen, QColor, QFont
+from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
-    QStyleOption, QStyle,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyleOption,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .db import Store
-
 
 # ---------- Defaults ---------------------------------------------------------
 
@@ -24,6 +27,7 @@ CYCLES_PER_LONG = 4
 
 
 # ---------- Ring widget ------------------------------------------------------
+
 
 class _Ring(QWidget):
     """Circular progress ring with mm:ss in the centre."""
@@ -94,6 +98,7 @@ class _Ring(QWidget):
 
 # ---------- Panel ------------------------------------------------------------
 
+
 @dataclass
 class _ActiveSession:
     db_id: int
@@ -120,14 +125,14 @@ class PomodoroPanel(QWidget):
     def __init__(self, store: Store, parent=None):
         super().__init__(parent)
         self.store = store
-        self._doc_id: Optional[str] = None
+        self._doc_id: str | None = None
         self._preset = 25
         self._phase = "focus"
         self._cycle = 0
         self._total = self._preset * 60
         self._remaining = self._total
         self._running = False
-        self._active: Optional[_ActiveSession] = None
+        self._active: _ActiveSession | None = None
 
         self._dark = True
         self._timer = QTimer(self)
@@ -139,7 +144,7 @@ class PomodoroPanel(QWidget):
         self._refresh()
 
     # public API
-    def set_active_document(self, doc_id: Optional[str]) -> None:
+    def set_active_document(self, doc_id: str | None) -> None:
         self._doc_id = doc_id
 
     def set_dark_mode(self, dark: bool) -> None:
@@ -149,11 +154,11 @@ class PomodoroPanel(QWidget):
         self._refresh()
 
     def _apply_panel_style(self):
-        dark   = self._dark
-        bg     = "#000000" if dark else "#ffffff"
-        ink    = "#f0f0f0" if dark else "#0a0a0a"
+        dark = self._dark
+        bg = "#000000" if dark else "#ffffff"
+        ink = "#f0f0f0" if dark else "#0a0a0a"
         border = "#1e1e1e" if dark else "#e4e4e0"
-        hover  = "#181818" if dark else "#eaeae6"
+        hover = "#181818" if dark else "#eaeae6"
         accent = "#d8a85a"
         # Use the panel's own stylesheet so it wins over the app-level sheet.
         # Every selector is scoped to children of this widget via descendant rules.
@@ -177,8 +182,8 @@ class PomodoroPanel(QWidget):
                 background:{hover};
             }}
             PomodoroPanel QPushButton:disabled {{
-                color:{'#333333' if dark else '#cccccc'};
-                border-color:{'#222' if dark else '#ddd'};
+                color:{"#333333" if dark else "#cccccc"};
+                border-color:{"#222" if dark else "#ddd"};
             }}
             PomodoroPanel QPushButton#playButton {{
                 background:{accent};
@@ -207,7 +212,7 @@ class PomodoroPanel(QWidget):
         self.pill_row.setSpacing(6)
         self._pills = []
         for i in range(CYCLES_PER_LONG):
-            lab = QLabel(f"{i+1:02d}")
+            lab = QLabel(f"{i + 1:02d}")
             lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lab.setFixedSize(36, 22)
             lab.setProperty("class", "pomPill")
@@ -270,8 +275,7 @@ class PomodoroPanel(QWidget):
         self._timer.stop()
         if self._active is not None:
             elapsed = int(time.time() - self._active.started_at)
-            self.store.end_session(self._active.db_id, completed=False,
-                                   actual_s=elapsed)
+            self.store.end_session(self._active.db_id, completed=False, actual_s=elapsed)
             self._active = None
         self._running = False
         self._remaining = self._total
@@ -315,8 +319,7 @@ class PomodoroPanel(QWidget):
     def _finish_phase(self, completed: bool):
         if self._active is not None:
             elapsed = int(time.time() - self._active.started_at)
-            self.store.end_session(self._active.db_id, completed=completed,
-                                   actual_s=elapsed)
+            self.store.end_session(self._active.db_id, completed=completed, actual_s=elapsed)
             mins = max(1, round(elapsed / 60))
             self.phase_completed.emit(self._phase, mins)
             self._active = None
@@ -334,16 +337,15 @@ class PomodoroPanel(QWidget):
     def _refresh(self):
         self.ring.set_state(self._remaining, self._total, self._phase)
         self.btn_play.setText(
-            "Pause" if self._running
-            else ("Resume" if self._remaining < self._total else "Begin")
+            "Pause" if self._running else ("Resume" if self._remaining < self._total else "Begin")
         )
         for m, b in self._preset_btns:
             b.setChecked(m == self._preset and self._phase == "focus")
         # pill colours follow dark/light theme
-        _on_bg    = "#ffffff" if self._dark else "#0a0a0a"
-        _on_fg    = "#000000" if self._dark else "#ffffff"
-        _done_bg  = "#2a2a2a" if self._dark else "#e8e8e8"
-        _done_fg  = "#666666" if self._dark else "#999999"
+        _on_bg = "#ffffff" if self._dark else "#0a0a0a"
+        _on_fg = "#000000" if self._dark else "#ffffff"
+        _done_bg = "#2a2a2a" if self._dark else "#e8e8e8"
+        _done_fg = "#666666" if self._dark else "#999999"
         _idle_col = "#444444" if self._dark else "#cccccc"
         _base = "border-radius:11px;font-family:monospace;font-size:10px;letter-spacing:2px;"
         for i, lab in enumerate(self._pills):
@@ -354,5 +356,6 @@ class PomodoroPanel(QWidget):
             elif done:
                 lab.setStyleSheet(f"background:{_done_bg};color:{_done_fg};{_base}")
             else:
-                lab.setStyleSheet(f"background:transparent;color:{_idle_col};"
-                                  f"border:1px solid {_idle_col};{_base}")
+                lab.setStyleSheet(
+                    f"background:transparent;color:{_idle_col};border:1px solid {_idle_col};{_base}"
+                )

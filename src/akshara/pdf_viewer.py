@@ -1,14 +1,25 @@
-import fitz  # PyMuPDF
-from PyQt6.QtWidgets import (
-    QWidget, QScrollArea, QVBoxLayout, QApplication, QMenu, QSizePolicy,
-)
-from PyQt6.QtCore import Qt, QRect, QPoint, QRectF, pyqtSignal, QTimer, QSize
-from PyQt6.QtGui import (
-    QPainter, QImage, QPixmap, QColor, QPen, QBrush,
-    QMouseEvent, QPaintEvent,
-)
-from typing import Optional, List
 from dataclasses import dataclass
+
+import pymupdf as fitz
+from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPixmap,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMenu,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 @dataclass
@@ -18,6 +29,7 @@ class TextSpan:
 
 
 # ---------- Single-page widget -----------------------------------------------
+
 
 class PDFPageWidget(QWidget):
     """
@@ -31,21 +43,21 @@ class PDFPageWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.page_index: int = -1
-        self._pixmap: Optional[QPixmap] = None
-        self._text_spans: List[TextSpan] = []
+        self._pixmap: QPixmap | None = None
+        self._text_spans: list[TextSpan] = []
         self._scale: float = 1.5
         self._full_text: str = ""
         self._span_char_ranges: list[tuple[int, int]] = []
 
-        self._selection_start: Optional[QPoint] = None
-        self._selection_end: Optional[QPoint] = None
-        self._selected_spans: List[int] = []
+        self._selection_start: QPoint | None = None
+        self._selection_end: QPoint | None = None
+        self._selected_spans: list[int] = []
         self._is_selecting = False
         self._show_selection = True
 
         self._tts_char_start: int = -1
         self._tts_char_end: int = -1
-        self._tts_highlight_spans: List[int] = []
+        self._tts_highlight_spans: list[int] = []
 
         self._selection_color = QColor(99, 102, 241, 80)
         self._tts_color = QColor(250, 204, 21, 150)
@@ -56,8 +68,7 @@ class PDFPageWidget(QWidget):
 
     # ---- content ----
 
-    def assign(self, page_index: int, pixmap: QPixmap,
-               text_spans: List[TextSpan], scale: float):
+    def assign(self, page_index: int, pixmap: QPixmap, text_spans: list[TextSpan], scale: float):
         self.page_index = page_index
         self._pixmap = pixmap
         self._text_spans = text_spans
@@ -133,7 +144,7 @@ class PDFPageWidget(QWidget):
 
     def find_text_position(self, search_text: str, start_from: int = 0) -> tuple[int, int]:
         search_clean = " ".join(search_text.lower().split())
-        full_clean   = " ".join(self._full_text.lower().split())
+        full_clean = " ".join(self._full_text.lower().split())
         pos = full_clean.find(search_clean, start_from)
         if pos >= 0:
             return pos, pos + len(search_clean)
@@ -161,8 +172,10 @@ class PDFPageWidget(QWidget):
                 if 0 <= idx < len(self._text_spans):
                     span = self._text_spans[idx]
                     rect = QRectF(
-                        span.bbox.x() * self._scale, span.bbox.y() * self._scale,
-                        span.bbox.width() * self._scale, span.bbox.height() * self._scale,
+                        span.bbox.x() * self._scale,
+                        span.bbox.y() * self._scale,
+                        span.bbox.width() * self._scale,
+                        span.bbox.height() * self._scale,
                     )
                     painter.drawRoundedRect(rect, 3, 3)
 
@@ -173,16 +186,17 @@ class PDFPageWidget(QWidget):
                 if 0 <= idx < len(self._text_spans):
                     span = self._text_spans[idx]
                     rect = QRectF(
-                        span.bbox.x() * self._scale, span.bbox.y() * self._scale,
-                        span.bbox.width() * self._scale, span.bbox.height() * self._scale,
+                        span.bbox.x() * self._scale,
+                        span.bbox.y() * self._scale,
+                        span.bbox.width() * self._scale,
+                        span.bbox.height() * self._scale,
                     )
                     painter.drawRoundedRect(rect, 2, 2)
 
         if self._is_selecting and self._selection_start and self._selection_end:
             painter.setBrush(QBrush(QColor(99, 102, 241, 30)))
             painter.setPen(QPen(QColor(99, 102, 241), 1, Qt.PenStyle.DashLine))
-            rect = QRect(self._selection_start, self._selection_end).normalized()
-            painter.drawRect(rect)
+            painter.drawRect(QRect(self._selection_start, self._selection_end).normalized())
 
     # ---- mouse ----
 
@@ -215,8 +229,10 @@ class PDFPageWidget(QWidget):
         pos = event.pos()
         for i, span in enumerate(self._text_spans):
             scaled = QRectF(
-                span.bbox.x() * self._scale, span.bbox.y() * self._scale,
-                span.bbox.width() * self._scale, span.bbox.height() * self._scale,
+                span.bbox.x() * self._scale,
+                span.bbox.y() * self._scale,
+                span.bbox.width() * self._scale,
+                span.bbox.height() * self._scale,
             )
             if scaled.contains(pos.toPointF()):
                 self._selected_spans = [i]
@@ -232,8 +248,10 @@ class PDFPageWidget(QWidget):
         self._selected_spans = []
         for i, span in enumerate(self._text_spans):
             span_rect = QRect(
-                int(span.bbox.x() * self._scale), int(span.bbox.y() * self._scale),
-                int(span.bbox.width() * self._scale), int(span.bbox.height() * self._scale),
+                int(span.bbox.x() * self._scale),
+                int(span.bbox.y() * self._scale),
+                int(span.bbox.width() * self._scale),
+                int(span.bbox.height() * self._scale),
             )
             if sel_rect.intersects(span_rect):
                 self._selected_spans.append(i)
@@ -249,8 +267,8 @@ class PDFPageWidget(QWidget):
 
 # ---------- Virtual-scroll canvas --------------------------------------------
 
-PAGE_GAP = 12        # px between pages
-RENDER_RADIUS = 2    # render current ±N pages
+PAGE_GAP = 12  # px between pages
+RENDER_RADIUS = 2  # render current ±N pages
 POOL_SIZE = RENDER_RADIUS * 2 + 1
 
 
@@ -265,12 +283,12 @@ class _Canvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._page_tops: List[int] = []      # y-offset of each page top
-        self._page_sizes: List[tuple[int, int]] = []  # (w, h) per page
+        self._page_tops: list[int] = []  # y-offset of each page top
+        self._page_sizes: list[tuple[int, int]] = []  # (w, h) per page
         self._bg = QColor("#000000")
 
         # Fixed pool of page widgets — reused, never recreated per page
-        self._pool: List[PDFPageWidget] = []
+        self._pool: list[PDFPageWidget] = []
         for _ in range(POOL_SIZE):
             pw = PDFPageWidget(self)
             pw.text_selected.connect(self.text_selected)
@@ -280,8 +298,14 @@ class _Canvas(QWidget):
         # page_index → pool slot (or -1 = not in pool)
         self._slot_for_page: dict[int, int] = {}
 
-    def setup(self, page_tops: List[int], page_sizes: List[tuple[int, int]],
-              bg: QColor, total_w: int, total_h: int):
+    def setup(
+        self,
+        page_tops: list[int],
+        page_sizes: list[tuple[int, int]],
+        bg: QColor,
+        total_w: int,
+        total_h: int,
+    ):
         self._page_tops = page_tops
         self._page_sizes = page_sizes
         self._bg = bg
@@ -312,8 +336,9 @@ class _Canvas(QWidget):
 
     # ---- pool management ----
 
-    def assign_slot(self, page_index: int, pixmap: QPixmap,
-                    text_spans: List[TextSpan], scale: float):
+    def assign_slot(
+        self, page_index: int, pixmap: QPixmap, text_spans: list[TextSpan], scale: float
+    ):
         if page_index in self._slot_for_page:
             slot = self._slot_for_page[page_index]
             pw = self._pool[slot]
@@ -332,8 +357,7 @@ class _Canvas(QWidget):
             slot = free[0]
         else:
             # evict the pool slot whose page_index is farthest from current
-            evict_page = max(self._slot_for_page,
-                             key=lambda p: abs(p - page_index))
+            evict_page = max(self._slot_for_page, key=lambda p: abs(p - page_index))
             slot = self._slot_for_page.pop(evict_page)
             self._pool[slot].release()
 
@@ -354,7 +378,7 @@ class _Canvas(QWidget):
     def is_assigned(self, page_index: int) -> bool:
         return page_index in self._slot_for_page
 
-    def widget_for_page(self, page_index: int) -> Optional[PDFPageWidget]:
+    def widget_for_page(self, page_index: int) -> PDFPageWidget | None:
         slot = self._slot_for_page.get(page_index)
         if slot is not None:
             return self._pool[slot]
@@ -381,6 +405,7 @@ class _Canvas(QWidget):
 
 # ---------- Viewer widget ----------------------------------------------------
 
+
 class PDFViewerWidget(QWidget):
     """
     Continuous-scroll PDF viewer with O(1) memory regardless of page count.
@@ -391,12 +416,12 @@ class PDFViewerWidget(QWidget):
     """
 
     text_selected = pyqtSignal(str)
-    current_page_changed = pyqtSignal(int)   # 0-indexed
+    current_page_changed = pyqtSignal(int)  # 0-indexed
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._dark_mode = True
-        self._doc: Optional[fitz.Document] = None
+        self._doc: fitz.Document | None = None
         self._zoom: float = 1.0
         self._page_count: int = 0
         self._current_page: int = 0
@@ -414,12 +439,10 @@ class PDFViewerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(False)   # we size the canvas ourselves
+        self.scroll_area.setWidgetResizable(False)  # we size the canvas ourselves
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.verticalScrollBar().valueChanged.connect(
-            self._on_scroll_value_changed
-        )
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
 
         self._canvas = _Canvas()
         self._canvas.text_selected.connect(self.text_selected)
@@ -488,10 +511,9 @@ class PDFViewerWidget(QWidget):
             self._current_read_position = 0
             return
 
-        pages_to_search = (
-            [p for p in assigned if p >= self._current_page] +
-            [p for p in assigned if p < self._current_page]
-        )
+        pages_to_search = [p for p in assigned if p >= self._current_page] + [
+            p for p in assigned if p < self._current_page
+        ]
         for pi in pages_to_search:
             pw = self._canvas.widget_for_page(pi)
             if pw is None or not pw.is_assigned():
@@ -541,8 +563,8 @@ class PDFViewerWidget(QWidget):
         if self._doc is None:
             return
         scale = self._zoom * 1.5
-        page_tops: List[int] = []
-        page_sizes: List[tuple[int, int]] = []
+        page_tops: list[int] = []
+        page_sizes: list[tuple[int, int]] = []
         y = PAGE_GAP
         max_w = 0
         for i in range(self._page_count):
@@ -558,7 +580,7 @@ class PDFViewerWidget(QWidget):
             y += ph + PAGE_GAP
 
         bg = QColor("#000000" if self._dark_mode else "#ffffff")
-        total_w = max_w + 40   # horizontal padding
+        total_w = max_w + 40  # horizontal padding
         total_h = y
         self._canvas.setup(page_tops, page_sizes, bg, total_w, total_h)
 
@@ -568,9 +590,7 @@ class PDFViewerWidget(QWidget):
 
     def _update_background(self):
         bg = "#000000" if self._dark_mode else "#ffffff"
-        self.scroll_area.setStyleSheet(
-            f"QScrollArea {{ background-color:{bg}; border:none; }}"
-        )
+        self.scroll_area.setStyleSheet(f"QScrollArea {{ background-color:{bg}; border:none; }}")
         self._canvas.set_bg(QColor(bg))
 
     def _on_scroll_value_changed(self, _):
@@ -613,7 +633,10 @@ class PDFViewerWidget(QWidget):
             if self._dark_mode:
                 pix.invert_irect()
             img = QImage(
-                pix.samples, pix.width, pix.height, pix.stride,
+                pix.samples,
+                pix.width,
+                pix.height,
+                pix.stride,
                 QImage.Format.Format_RGB888,
             )
             pixmap = QPixmap.fromImage(img.copy())
@@ -622,7 +645,7 @@ class PDFViewerWidget(QWidget):
         except Exception:
             pass
 
-    def _extract_text_spans(self, page: fitz.Page) -> List[TextSpan]:
+    def _extract_text_spans(self, page: fitz.Page) -> list[TextSpan]:
         spans = []
         try:
             for block in page.get_text("dict")["blocks"]:
@@ -634,11 +657,12 @@ class PDFViewerWidget(QWidget):
                         if not text:
                             continue
                         bbox = span.get("bbox", [0, 0, 0, 0])
-                        spans.append(TextSpan(
-                            text=text,
-                            bbox=QRectF(bbox[0], bbox[1],
-                                        bbox[2] - bbox[0], bbox[3] - bbox[1]),
-                        ))
+                        spans.append(
+                            TextSpan(
+                                text=text,
+                                bbox=QRectF(bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]),
+                            )
+                        )
         except Exception:
             pass
         return spans

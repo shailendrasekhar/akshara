@@ -1,22 +1,37 @@
 import os
 import time
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QToolBar, QStatusBar, QFileDialog, QSlider,
-    QSpinBox, QToolButton, QMessageBox, QApplication,
-    QStackedWidget, QPushButton, QDockWidget, QSizePolicy,
-)
-from PyQt6.QtCore import Qt, pyqtSlot, QTimer, QSize
-from PyQt6.QtGui import QAction, QKeySequence
+from typing import ClassVar
 
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QStackedWidget,
+    QStatusBar,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .analytics import AnalyticsDialog
+from .db import Store
+from .library import LibraryPanel
 from .pdf_handler import PDFDocument
 from .pdf_viewer import PDFViewerWidget
+from .pomodoro import PomodoroPanel
 from .tts_engine import TTSEngine
 from .ui.styles import get_main_stylesheet
-from .db import Store
-from .pomodoro import PomodoroPanel
-from .analytics import AnalyticsDialog
-from .library import LibraryPanel
 
 
 class WelcomeWidget(QWidget):
@@ -34,22 +49,22 @@ class WelcomeWidget(QWidget):
         self._apply_theme()
 
     def _apply_theme(self):
-        from PyQt6.QtGui import QPalette, QColor as QC
+        from PyQt6.QtGui import QColor as QC
+        from PyQt6.QtGui import QPalette
+
         dark = self._dark_mode
-        bg      = "#000000" if dark else "#ffffff"
-        ink     = "#f0f0f0" if dark else "#0a0a0a"
-        muted   = "#555555" if dark else "#aaaaaa"
-        accent  = "#d8a85a"
-        hint    = "#2a2a2a" if dark else "#eeeeea"
+        bg = "#000000" if dark else "#ffffff"
+        ink = "#f0f0f0" if dark else "#0a0a0a"
+        muted = "#555555" if dark else "#aaaaaa"
+        accent = "#d8a85a"
+        hint = "#2a2a2a" if dark else "#eeeeea"
 
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, QC(bg))
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
-        self.icon_label.setStyleSheet(
-            f"font-size:60px;background:transparent;color:{ink};"
-        )
+        self.icon_label.setStyleSheet(f"font-size:60px;background:transparent;color:{ink};")
         self.title_label.setStyleSheet(
             f"font-family:Georgia,serif;font-size:44px;font-weight:300;"
             f"letter-spacing:10px;color:{ink};background:transparent;"
@@ -74,9 +89,7 @@ class WelcomeWidget(QWidget):
             f"font-family:'Ubuntu Mono','Courier New',monospace;"
             f"font-size:11px;color:{muted};background:transparent;"
         )
-        self.shortcuts_widget.setStyleSheet(
-            f"background:{hint};border-radius:8px;"
-        )
+        self.shortcuts_widget.setStyleSheet(f"background:{hint};border-radius:8px;")
         for label in self._shortcut_labels:
             label.setStyleSheet(
                 f"font-family:'Ubuntu Mono','Courier New',monospace;"
@@ -122,13 +135,13 @@ class WelcomeWidget(QWidget):
         sc_layout.setSpacing(6)
         self._shortcut_labels = []
         shortcuts = [
-            ("Space",          "Play / pause reading"),
-            ("← →",           "Previous / next page"),
-            ("Ctrl+R",         "Read current page"),
-            ("Ctrl+Shift+R",   "Read selection"),
-            ("Ctrl+T",         "Toggle dark / light"),
-            ("Ctrl+Shift+A",   "Analytics"),
-            ("L",              "Show / hide library"),
+            ("Space", "Play / pause reading"),
+            ("← →", "Previous / next page"),
+            ("Ctrl+R", "Read current page"),
+            ("Ctrl+Shift+R", "Read selection"),
+            ("Ctrl+T", "Toggle dark / light"),
+            ("Ctrl+Shift+A", "Analytics"),
+            ("L", "Show / hide library"),
         ]
         for key, desc in shortcuts:
             row = QHBoxLayout()
@@ -145,28 +158,29 @@ class WelcomeWidget(QWidget):
 
 class MainWindow(QMainWindow):
     """Main application window."""
-    
+
     # Text size presets: (label, app font pt, stylesheet base px)
-    _TEXT_SIZES = [
-        ("S",  10, 13),
-        ("M",  12, 15),
-        ("L",  14, 17),
+    _TEXT_SIZES: ClassVar[list[tuple[str, int, int]]] = [
+        ("S", 10, 13),
+        ("M", 12, 15),
+        ("L", 14, 17),
     ]
-    _TEXT_SIZE_IDX = 1   # default: Medium
+    _TEXT_SIZE_IDX = 1  # default: Medium
 
     def __init__(self):
         super().__init__()
 
         # Theme state - based on local time (6-18 is light, otherwise dark)
         from datetime import datetime
+
         current_hour = datetime.now().hour
         self._dark_mode = not (6 <= current_hour < 18)
         self._text_size_idx = self._TEXT_SIZE_IDX
-        
+
         # Initialize components
         self.pdf_doc = PDFDocument(self)
         self.tts_engine = TTSEngine(self)
-        
+
         self.tts_engine.enable_hf(True, voice="af_heart", lang_code="a")
 
         self.store = Store()
@@ -180,8 +194,8 @@ class MainWindow(QMainWindow):
         self._pomodoro_dock.setObjectName("pomodoroDock")
         self._pomodoro_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
         self._pomodoro_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable |
-            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         self._pomodoro_dock.setWidget(self.pomodoro)
         self._pomodoro_dock.setMinimumWidth(240)
@@ -194,8 +208,8 @@ class MainWindow(QMainWindow):
         self._library_dock.setObjectName("libraryDock")
         self._library_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
         self._library_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable |
-            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         self._library_dock.setWidget(self.library)
         self._library_dock.setMinimumWidth(220)
@@ -207,7 +221,7 @@ class MainWindow(QMainWindow):
         self._setup_central_widget()
         self._setup_status_bar()
         self._connect_signals()
-        
+
         # Apply initial theme and text size
         self._apply_theme()
         label, _, _ = self._TEXT_SIZES[self._text_size_idx]
@@ -215,45 +229,45 @@ class MainWindow(QMainWindow):
 
         # Enable drag and drop
         self.setAcceptDrops(True)
-    
+
     def _setup_window(self):
         self.setWindowTitle("AKSHARA - PDF Reader")
         self.setMinimumSize(800, 600)
         self.showMaximized()
-    
+
     def _setup_menu(self):
         menubar = self.menuBar()
-        
+
         # File menu
         file_menu = menubar.addMenu("&File")
-        
+
         open_action = QAction("&Open PDF...", self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._open_file_dialog)
         file_menu.addAction(open_action)
-        
+
         file_menu.addSeparator()
-        
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # View menu
         view_menu = menubar.addMenu("&View")
-        
+
         zoom_in_action = QAction("Zoom &In", self)
         zoom_in_action.setShortcut(QKeySequence.StandardKey.ZoomIn)
         zoom_in_action.triggered.connect(self._zoom_in)
         view_menu.addAction(zoom_in_action)
-        
+
         zoom_out_action = QAction("Zoom &Out", self)
         zoom_out_action.setShortcut(QKeySequence.StandardKey.ZoomOut)
         zoom_out_action.triggered.connect(self._zoom_out)
         view_menu.addAction(zoom_out_action)
-        
+
         view_menu.addSeparator()
-        
+
         self.theme_action = QAction("Switch to &Light Mode", self)
         self.theme_action.setShortcut(QKeySequence("Ctrl+T"))
         self.theme_action.triggered.connect(self._toggle_theme)
@@ -276,36 +290,36 @@ class MainWindow(QMainWindow):
 
         # Speech menu
         speech_menu = menubar.addMenu("&Speech")
-        
+
         read_page_action = QAction("Read &Page", self)
         read_page_action.setShortcut(QKeySequence("Ctrl+R"))
         read_page_action.triggered.connect(self._play_page)
         speech_menu.addAction(read_page_action)
-        
+
         read_selection_action = QAction("Read &Selection", self)
         read_selection_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
         read_selection_action.triggered.connect(self._play_selection)
         speech_menu.addAction(read_selection_action)
-        
+
         speech_menu.addSeparator()
-        
+
         pause_action = QAction("&Pause/Resume", self)
         pause_action.setShortcut(QKeySequence("Space"))
         pause_action.triggered.connect(self._toggle_pause)
         speech_menu.addAction(pause_action)
-        
+
         stop_action = QAction("S&top", self)
         stop_action.setShortcut(QKeySequence("Escape"))
         stop_action.triggered.connect(self._stop)
         speech_menu.addAction(stop_action)
-        
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
-        
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
-    
+
     def _setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
@@ -488,7 +502,7 @@ class MainWindow(QMainWindow):
         self.theme_btn.setToolTip("Toggle theme  Ctrl+T")
         self.theme_btn.clicked.connect(self._toggle_theme)
         toolbar.addWidget(self.theme_btn)
-    
+
     def _setup_central_widget(self):
         self.stacked_widget = QStackedWidget()
         self.welcome_widget = WelcomeWidget(dark_mode=self._dark_mode)
@@ -516,7 +530,7 @@ class MainWindow(QMainWindow):
         self.tts_engine.speech_finished.connect(self._on_speech_finished)
         self.tts_engine.word_changed.connect(self._on_word_changed)
         self.tts_engine.error_occurred.connect(self._on_error)
-    
+
     def _toggle_theme(self):
         self._dark_mode = not self._dark_mode
         self._apply_theme()
@@ -543,25 +557,24 @@ class MainWindow(QMainWindow):
         self._apply_text_size()
 
     def _apply_text_size(self):
-        label, pt, px = self._TEXT_SIZES[self._text_size_idx]
+        label, pt, base_px = self._TEXT_SIZES[self._text_size_idx]
         self.text_size_btn.setText(f"T{label}")
         font = QApplication.font()
         font.setPointSize(pt)
         QApplication.setFont(font)
-        _, _, base_px = self._TEXT_SIZES[self._text_size_idx]
         self.setStyleSheet(get_main_stylesheet(self._dark_mode, base_px))
-    
+
     def _open_file_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open PDF", "", "PDF Files (*.pdf);;All Files (*)"
         )
         if file_path:
             self._load_pdf(file_path)
-    
+
     def _load_pdf(self, file_path: str):
         self.status_label.setText(f"Loading: {os.path.basename(file_path)}...")
         QApplication.processEvents()
-        
+
         if self.pdf_doc.load(file_path):
             self._active_doc_id = self.store.upsert_document(
                 file_path=file_path,
@@ -582,7 +595,7 @@ class MainWindow(QMainWindow):
             self.pdf_doc.zoom,
             self._dark_mode,
         )
-    
+
     def _prev_page(self):
         cur = self.pdf_viewer.current_page
         if cur > 0:
@@ -614,10 +627,8 @@ class MainWindow(QMainWindow):
 
         if self._active_doc_id:
             self.store.update_last_page(self._active_doc_id, page_index + 1)
-            self.library.update_document_progress(
-                self.pdf_doc._file_path, page_index + 1
-            )
-    
+            self.library.update_document_progress(self.pdf_doc._file_path, page_index + 1)
+
     def _zoom_in(self):
         if self.pdf_doc.zoom < 3.0:
             self.pdf_doc.zoom = round(self.pdf_doc.zoom + 0.25, 2)
@@ -644,7 +655,7 @@ class MainWindow(QMainWindow):
         optimal_zoom = max(0.5, min(round(optimal_zoom * 4) / 4, 3.0))
         self.pdf_doc.zoom = optimal_zoom
         self._update_zoom_label()
-    
+
     def _play_page(self):
         if not self.pdf_doc.is_loaded:
             return
@@ -654,7 +665,7 @@ class MainWindow(QMainWindow):
             self.tts_engine.speak(text)
         else:
             self.status_label.setText("No text found on this page")
-    
+
     def _play_selection(self):
         selected = self.pdf_viewer.get_selected_text()
         if selected.strip():
@@ -662,7 +673,7 @@ class MainWindow(QMainWindow):
             self.tts_engine.speak(selected)
         else:
             self.status_label.setText("Select text on the PDF first")
-    
+
     def _toggle_pause(self):
         if self.tts_engine.is_speaking:
             if self.tts_engine.is_paused:
@@ -673,13 +684,13 @@ class MainWindow(QMainWindow):
                 self.tts_engine.pause()
                 self.pause_btn.setText("▶ Resume")
                 self.tts_status_label.setText("⏸ Paused")
-    
+
     def _stop(self):
         self.tts_engine.stop()
         self._update_tts_buttons(False)
         self.pdf_viewer.highlight_text("")
         self.tts_status_label.setText("")
-    
+
     def _update_speed(self, value: int):
         speed = value / 100.0
         self.speed_value_label.setText(f"{speed:.1f}x")
@@ -689,41 +700,41 @@ class MainWindow(QMainWindow):
         self.pause_btn.setEnabled(playing)
         self.stop_btn.setEnabled(playing)
         self.pause_btn.setText("⏸ Pause")
-    
+
     @pyqtSlot(int)
     def _on_document_loaded(self, page_count: int):
         self.setWindowTitle(f"AKSHARA - {self.pdf_doc.title}")
-        
+
         self.page_spin.setMaximum(page_count)
         self.page_spin.setValue(1)
         self.page_spin.setEnabled(True)
         self.page_total_label.setText(f" / {page_count}")
-        
+
         self.prev_btn.setEnabled(True)
         self.next_btn.setEnabled(True)
         self.play_btn.setEnabled(True)
         self.play_sel_btn.setEnabled(True)
         self.zoom_in_btn.setEnabled(True)
         self.zoom_out_btn.setEnabled(True)
-        
+
         self.status_label.setText(f"Loaded: {self.pdf_doc.title} ({page_count} pages)")
-    
+
     @pyqtSlot(str)
     def _on_text_selected(self, text: str):
         self.status_label.setText(f"Selected {len(text.split())} words — right-click to copy")
-    
+
     @pyqtSlot()
     def _on_speech_started(self):
         self._update_tts_buttons(True)
         self.tts_status_label.setText("🔊 Reading...")
-    
+
     @pyqtSlot()
     def _on_speech_finished(self):
         self._update_tts_buttons(False)
         self.pdf_viewer.highlight_text("")
         self.tts_status_label.setText("✓ Done")
         QTimer.singleShot(2000, lambda: self.tts_status_label.setText(""))
-    
+
     @pyqtSlot(str)
     def _on_word_changed(self, word_chunk: str):
         self.pdf_viewer.highlight_text(word_chunk)
@@ -761,22 +772,22 @@ class MainWindow(QMainWindow):
             "<li>Text highlighting while reading</li>"
             "<li>Adjustable reading speed</li>"
             "<li>Light/Dark mode toggle</li>"
-            "</ul>"
+            "</ul>",
         )
-    
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and urls[0].toLocalFile().lower().endswith('.pdf'):
+            if urls and urls[0].toLocalFile().lower().endswith(".pdf"):
                 event.acceptProposedAction()
-    
+
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
-            if file_path.lower().endswith('.pdf'):
+            if file_path.lower().endswith(".pdf"):
                 self._load_pdf(file_path)
-    
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Left:
             self._prev_page()
@@ -793,7 +804,7 @@ class MainWindow(QMainWindow):
             self._toggle_library()
         else:
             super().keyPressEvent(event)
-    
+
     def closeEvent(self, event):
         self.tts_engine.cleanup()
         self.pdf_doc.close()

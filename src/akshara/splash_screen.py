@@ -3,19 +3,33 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import (
-    Qt, QTimer, QPropertyAnimation, QEasingCurve,
-    pyqtSignal, QRect, QPoint, QSize,
-    QSequentialAnimationGroup, QParallelAnimationGroup,
+    QEasingCurve,
+    QParallelAnimationGroup,
+    QPropertyAnimation,
+    QRect,
+    Qt,
+    QTimer,
+    pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QPainter, QColor, QFont, QPainterPath, QPen, QPixmap,
+    QColor,
+    QFont,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
 )
 from PyQt6.QtWidgets import (
-    QWidget, QApplication, QMainWindow, QGraphicsOpacityEffect,
+    QApplication,
+    QGraphicsOpacityEffect,
+    QMainWindow,
+    QWidget,
 )
 
+from .resources import resource_path
 
 # ---------- Logo widget (pure QPainter, no graphics effects on children) ------
+
 
 class _Logo(QWidget):
     """
@@ -38,9 +52,9 @@ class _Logo(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        ink  = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
-        bg   = QColor("#000000") if self._dark else QColor("#ffffff")
-        rim  = QColor("#2a2a2a") if self._dark else QColor("#e0e0dc")
+        ink = QColor("#ffffff") if self._dark else QColor("#0a0a0a")
+        bg = QColor("#000000") if self._dark else QColor("#ffffff")
+        rim = QColor("#2a2a2a") if self._dark else QColor("#e0e0dc")
 
         d = min(self.width(), self.height()) - 2
         r = QRect(1, 1, d, d)
@@ -60,7 +74,7 @@ class _Logo(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            ox = target.x() + (target.width()  - scaled.width())  // 2
+            ox = target.x() + (target.width() - scaled.width()) // 2
             oy = target.y() + (target.height() - scaled.height()) // 2
             p.drawPixmap(ox, oy, scaled)
         else:
@@ -71,6 +85,7 @@ class _Logo(QWidget):
 
 
 # ---------- Full-screen splash overlay ----------------------------------------
+
 
 class SplashScreen(QWidget):
     """
@@ -83,23 +98,23 @@ class SplashScreen(QWidget):
 
     finished = pyqtSignal()
 
-    _LOGO_LARGE = 180   # px — centred phase
-    _LOGO_SMALL = 46    # px — corner resting size
+    _LOGO_LARGE = 180  # px — centred phase
+    _LOGO_SMALL = 46  # px — corner resting size
     # Logo lands at screen top-left + this offset (splash is a screen overlay)
-    _CORNER_X   = 16
-    _CORNER_Y   = 54    # below menu bar / title bar
+    _CORNER_X = 16
+    _CORNER_Y = 54  # below menu bar / title bar
 
     def __init__(self, main_window: QMainWindow, dark_mode: bool = True):
         super().__init__(None)
-        self._win  = main_window
+        self._win = main_window
         self._dark = dark_mode
 
         bg = "#000000" if dark_mode else "#ffffff"
         self.setStyleSheet(f"background:{bg};")
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.SplashScreen
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.SplashScreen
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
@@ -108,18 +123,19 @@ class SplashScreen(QWidget):
         self.setGeometry(screen)
 
         # Logo — large, centred
-        logo_path = Path(__file__).resolve().parents[1] / "resources" / "icons" / "logo.png"
+        logo_path = resource_path("icons", "logo.png")
         self._logo = _Logo(self._LOGO_LARGE, dark_mode, logo_path, parent=self)
 
-        cx = (screen.width()  - self._LOGO_LARGE) // 2
+        cx = (screen.width() - self._LOGO_LARGE) // 2
         cy = (screen.height() - self._LOGO_LARGE) // 2
         self._logo.move(cx, cy)
         self._logo_start_rect = QRect(cx, cy, self._LOGO_LARGE, self._LOGO_LARGE)
 
         # Wordmark below logo
-        ink   = "#ffffff" if dark_mode else "#0a0a0a"
+        ink = "#ffffff" if dark_mode else "#0a0a0a"
         muted = "#888888" if dark_mode else "#777777"
         from PyQt6.QtWidgets import QLabel
+
         self._title = QLabel("AKSHARA", self)
         self._title.setStyleSheet(
             f"font-family:Georgia,serif;font-size:36px;font-weight:300;"
@@ -174,15 +190,20 @@ class SplashScreen(QWidget):
 
         a_logo = QPropertyAnimation(self._logo_op, b"opacity", self)
         a_logo.setDuration(dur)
-        a_logo.setStartValue(0.0); a_logo.setEndValue(1.0)
+        a_logo.setStartValue(0.0)
+        a_logo.setEndValue(1.0)
         a_logo.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         a_title = QPropertyAnimation(self._text_op, b"opacity", self)
-        a_title.setDuration(dur); a_title.setStartValue(0.0); a_title.setEndValue(1.0)
+        a_title.setDuration(dur)
+        a_title.setStartValue(0.0)
+        a_title.setEndValue(1.0)
         a_title.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         a_sub = QPropertyAnimation(self._sub_op, b"opacity", self)
-        a_sub.setDuration(dur); a_sub.setStartValue(0.0); a_sub.setEndValue(1.0)
+        a_sub.setDuration(dur)
+        a_sub.setStartValue(0.0)
+        a_sub.setEndValue(1.0)
         a_sub.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         grp = QParallelAnimationGroup(self)
@@ -197,16 +218,21 @@ class SplashScreen(QWidget):
 
     def _phase_travel(self):
         a_text = QPropertyAnimation(self._text_op, b"opacity", self)
-        a_text.setDuration(300); a_text.setStartValue(1.0); a_text.setEndValue(0.0)
+        a_text.setDuration(300)
+        a_text.setStartValue(1.0)
+        a_text.setEndValue(0.0)
 
         a_sub = QPropertyAnimation(self._sub_op, b"opacity", self)
-        a_sub.setDuration(300); a_sub.setStartValue(1.0); a_sub.setEndValue(0.0)
+        a_sub.setDuration(300)
+        a_sub.setStartValue(1.0)
+        a_sub.setEndValue(0.0)
 
         # Logo travels to screen top-left (splash covers the full screen)
         end_rect = QRect(
             self._screen.x() + self._CORNER_X,
             self._screen.y() + self._CORNER_Y,
-            self._LOGO_SMALL, self._LOGO_SMALL,
+            self._LOGO_SMALL,
+            self._LOGO_SMALL,
         )
 
         a_geom = QPropertyAnimation(self._logo, b"geometry", self)
@@ -219,7 +245,8 @@ class SplashScreen(QWidget):
         self._win.show()
         a_win = QPropertyAnimation(self._win_op, b"opacity", self)
         a_win.setDuration(900)
-        a_win.setStartValue(0.0); a_win.setEndValue(1.0)
+        a_win.setStartValue(0.0)
+        a_win.setEndValue(1.0)
         a_win.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         grp = QParallelAnimationGroup(self)
@@ -239,6 +266,7 @@ class SplashScreen(QWidget):
 
 
 # ---------- Controller --------------------------------------------------------
+
 
 class SplashController:
     def __init__(self, main_window: QMainWindow, dark_mode: bool = True):

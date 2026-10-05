@@ -3,61 +3,52 @@ UI Styles — minimalist black/white with warm-amber accent.
 """
 
 FONT_FAMILY = "'Georgia', 'Times New Roman', serif"
-MONO_FONT   = "'Ubuntu Mono', 'Courier New', monospace"
+MONO_FONT = "'Ubuntu Mono', 'Courier New', monospace"
 
-ACCENT      = "#d8a85a"   # warm amber — used in ring, progress bars, active states
-ACCENT_DIM  = "#8a6530"   # dimmed amber for borders
+ACCENT = "#d8a85a"  # warm amber — used in ring, progress bars, active states
+ACCENT_DIM = "#8a6530"  # dimmed amber for borders
 
 DARK_COLORS = {
-    "bg":           "#000000",
+    "bg": "#000000",
     "bg_secondary": "#0a0a0a",
-    "bg_elevated":  "#111111",
-    "bg_hover":     "#181818",
-    "bg_card":      "#0d0d0d",
-
-    "text":            "#f0f0f0",
-    "text_secondary":  "#a0a0a0",
-    "text_muted":      "#555555",
-
-    "border":       "#1e1e1e",
+    "bg_elevated": "#111111",
+    "bg_hover": "#181818",
+    "bg_card": "#0d0d0d",
+    "text": "#f0f0f0",
+    "text_secondary": "#a0a0a0",
+    "text_muted": "#555555",
+    "border": "#1e1e1e",
     "border_light": "#2a2a2a",
-
-    "accent":       ACCENT,
-    "accent_dim":   ACCENT_DIM,
-
-    "success":   "#3ecf8e",
-    "error":     "#f06060",
+    "accent": ACCENT,
+    "accent_dim": ACCENT_DIM,
+    "success": "#3ecf8e",
+    "error": "#f06060",
     "highlight": "#ffd54f",
 }
 
 LIGHT_COLORS = {
-    "bg":           "#ffffff",
+    "bg": "#ffffff",
     "bg_secondary": "#fafaf8",
-    "bg_elevated":  "#f2f2ef",
-    "bg_hover":     "#eaeae6",
-    "bg_card":      "#f7f7f5",
-
-    "text":            "#0a0a0a",
-    "text_secondary":  "#5a5a5a",
-    "text_muted":      "#aaaaaa",
-
-    "border":       "#e4e4e0",
+    "bg_elevated": "#f2f2ef",
+    "bg_hover": "#eaeae6",
+    "bg_card": "#f7f7f5",
+    "text": "#0a0a0a",
+    "text_secondary": "#5a5a5a",
+    "text_muted": "#aaaaaa",
+    "border": "#e4e4e0",
     "border_light": "#d0d0cc",
-
-    "accent":       ACCENT,
-    "accent_dim":   "#e8c880",
-
-    "success":   "#1a8c5a",
-    "error":     "#cc3333",
+    "accent": ACCENT,
+    "accent_dim": "#e8c880",
+    "success": "#1a8c5a",
+    "error": "#cc3333",
     "highlight": "#ffe066",
 }
 
 
 def get_main_stylesheet(dark_mode: bool = True, base_px: int = 15) -> str:
     C = DARK_COLORS if dark_mode else LIGHT_COLORS
-    sm  = max(base_px - 2, 9)   # small  (labels, muted text)
-    md  = base_px               # medium (base)
-    lg  = base_px + 2           # large  (buttons, menus)
+    sm = max(base_px - 2, 9)  # small  (labels, muted text)
+    md = base_px  # medium (base)
 
     return f"""
     /* ===== Global ===== */

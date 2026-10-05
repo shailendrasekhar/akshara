@@ -15,10 +15,9 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
-
 
 # ---------- Location ---------------------------------------------------------
+
 
 def default_db_path() -> Path:
     override = os.environ.get("AKSHARA_DB")
@@ -85,6 +84,7 @@ CREATE TABLE IF NOT EXISTS tts_segments (
 
 # ---------- Helpers ----------------------------------------------------------
 
+
 def _hash_file(path: str, chunk: int = 1 << 20) -> str:
     h = hashlib.sha1()
     with open(path, "rb") as f:
@@ -98,11 +98,12 @@ def _hash_file(path: str, chunk: int = 1 << 20) -> str:
 
 # ---------- Store ------------------------------------------------------------
 
+
 @dataclass
 class DocumentRow:
     id: str
     title: str
-    author: Optional[str]
+    author: str | None
     path: str
     pages: int
     last_page: int
@@ -111,7 +112,7 @@ class DocumentRow:
 class Store:
     """Thin SQLite wrapper. One Store per app instance is fine."""
 
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(self, path: Path | None = None):
         self.path = Path(path) if path else default_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
@@ -132,7 +133,7 @@ class Store:
             raise
 
     # ---- documents ----
-    def upsert_document(self, file_path: str, title: str, author: Optional[str], pages: int) -> str:
+    def upsert_document(self, file_path: str, title: str, author: str | None, pages: int) -> str:
         doc_id = _hash_file(file_path)
         now = int(time.time())
         with self.tx() as c:
@@ -169,7 +170,9 @@ class Store:
             )
             return int(cur.lastrowid)
 
-    def end_session(self, session_id: int, completed: bool, actual_s: int, pages_read: int = 0) -> None:
+    def end_session(
+        self, session_id: int, completed: bool, actual_s: int, pages_read: int = 0
+    ) -> None:
         with self.tx() as c:
             c.execute(
                 "UPDATE sessions SET ended_at = ?, completed = ?, duration_s = ?, pages_read = ? WHERE id = ?",

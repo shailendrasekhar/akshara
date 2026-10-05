@@ -8,20 +8,16 @@ echo "🔧 Building AKSHARA standalone application..."
 # Ensure we're in the project directory
 cd "$(dirname "$0")"
 
-# Activate conda environment
-source ~/anaconda3/etc/profile.d/conda.sh
-conda activate akshara
-
 # Clean previous builds
 rm -rf build dist
 
 # Build with PyInstaller
-pyinstaller \
+uv run --group build pyinstaller \
     --name="akshara" \
     --onefile \
     --windowed \
-    --add-data="resources:resources" \
-    main.py
+    --add-data="src/akshara/resources:akshara/resources" \
+    src/akshara/__main__.py
 
 echo "✅ Build complete!"
 echo "📦 Executable: dist/akshara"

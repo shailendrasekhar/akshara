@@ -1,6 +1,5 @@
-import fitz
+import pymupdf as fitz
 from PyQt6.QtCore import QObject, pyqtSignal
-from typing import Optional
 
 
 class PDFDocument(QObject):
@@ -9,7 +8,7 @@ class PDFDocument(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._doc: Optional[fitz.Document] = None
+        self._doc: fitz.Document | None = None
         self._current_page: int = 0
         self._zoom: float = 1.0
         self._file_path: str = ""
@@ -63,7 +62,7 @@ class PDFDocument(QObject):
             self._file_path = ""
             self._current_page = 0
 
-    def get_page_size(self, page_num: Optional[int] = None) -> tuple[float, float]:
+    def get_page_size(self, page_num: int | None = None) -> tuple[float, float]:
         if not self._doc:
             return 0.0, 0.0
         try:
@@ -72,7 +71,7 @@ class PDFDocument(QObject):
         except Exception:
             return 0.0, 0.0
 
-    def extract_text(self, page_num: Optional[int] = None) -> str:
+    def extract_text(self, page_num: int | None = None) -> str:
         if not self._doc:
             return ""
         try:
